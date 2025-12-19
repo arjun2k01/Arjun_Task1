@@ -1,36 +1,47 @@
 import { Injectable } from '@nestjs/common';
-import * as XLSX from 'xlsx'; // Ensure XLSX (SheetJS) is imported correctly
-import { WeatherService } from '../weather/weather.service'; // Assuming you have a weather service to fetch data
-
-export interface RowErrorDto {
-  rowNumber: number;
-  errors: string[];
-}
-
-// Define a type for row data structure
-export interface MeterData {
-  date: string;
-  startTime: string;
-  stopTime: string;
-  exportReading: number;
-  importReading: number;
-}
+import * as XLSX from 'xlsx';  // Ensure XLSX (SheetJS) is imported correctly
+import { MeterData, RowErrorDto } from './meter-data.types';  // Import types from the new file
 
 @Injectable()
 export class MeterExcelService {
-  constructor(private readonly weatherService: WeatherService) {}
 
+  // Helper function to validate numeric values
+  isNumeric(value: any): boolean {
+    return !isNaN(value) && value !== null && value !== '';
+  }
+
+  // Function to handle POA Pyranometer validation (0 <= value <= 1500)
+  isValidPOA(value: any): boolean {
+    return value >= 0 && value <= 1500;
+  }
+
+  // Function to handle GHI Pyranometer validation (0 <= value <= 1500)
+  isValidGHI(value: any): boolean {
+    return value >= 0 && value <= 1500;
+  }
+
+  // Function to handle Albedo validation (0 <= value <= 1500)
+  isValidAlbedo(value: any): boolean {
+    return value >= 0 && value <= 1500;
+  }
+
+  // Function to handle temperature validation (greater than 0 for Module Temp, >= 0 for Ambient Temp)
+  isValidTemperature(value: any): boolean {
+    return value > 0;
+  }
+
+  // Function to validate non-negative values (Wind Speed, Rainfall, Humidity)
+  isValidNonNegative(value: any): boolean {
+    return value >= 0;
+  }
+
+  // Parse and validate the meter data from the uploaded Excel file
   async parseAndValidate(fileBuffer: Buffer | Uint8Array) {
-    let weatherData: MeterData[] = [];
+    let meterData: MeterData[] = [];
     const errors: RowErrorDto[] = [];
 
     try {
-      // Read the workbook using SheetJS
       const workbook = XLSX.read(fileBuffer, { type: 'buffer' });
-
-      console.log('Workbook loaded successfully.');
-
-      // Pick the first sheet from the workbook
       const sheetName = workbook.SheetNames[0];
       const worksheet = workbook.Sheets[sheetName];
 
@@ -38,107 +49,62 @@ export class MeterExcelService {
         throw new Error('Worksheet not found.');
       }
 
-      // Convert worksheet to JSON data (skip header row)
-      const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, raw: false });
+      // Convert worksheet to JSON
+      const jsonData = XLSX.utils.sheet_to_json(worksheet);
 
-      console.log('Worksheet loaded:', sheetName);
-      console.log('Total rows in the worksheet:', jsonData.length);
+      jsonData.forEach((row: MeterData, index: number) => {
+        const rowErrors: string[] = [];
 
-      // Process each row (skip header row)
-      for (let index = 1; index < jsonData.length; index++) {
-        const row = jsonData[index] as any[];  // Cast row as an array (since each row is an array)
+        // Validate POA Pyranometer
+        if (!this.isValidPOA(row.poA)) {
+          rowErrors.push(`Invalid POA Pyranometer at row ${index + 1}`);
+        }
 
-        // Cast the row as MeterData
-        const data: MeterData = {
-          date: row[0],  // Adjust based on actual columns in your sheet
-          startTime: row[1],
-          stopTime: row[2],
-          exportReading: row[3],
-          importReading: row[4],
-        };
+        // Validate GHI Pyranometer
+        if (!this.isValidGHI(row.ghi)) {
+          rowErrors.push(`Invalid GHI Pyranometer at row ${index + 1}`);
+        }
 
-        // Validate the row
-        const rowErrors = this.validateRow(data, index + 1); // Validate row, include rowNumber as index+1
+        // Validate Albedo
+        if (!this.isValidAlbedo(row.albedo)) {
+          rowErrors.push(`Invalid Albedo at row ${index + 1}`);
+        }
+
+        // Validate Module Temperature
+        if (!this.isValidTemperature(row.moduleTemperature)) {
+          rowErrors.push(`Invalid Module Temperature at row ${index + 1}`);
+        }
+
+        // Validate Ambient Temperature
+        if (!this.isValidTemperature(row.ambientTemperature)) {
+          rowErrors.push(`Invalid Ambient Temperature at row ${index + 1}`);
+        }
+
+        // Validate Wind Speed, Rainfall, Humidity
+        if (!this.isValidNonNegative(row.windSpeed)) {
+          rowErrors.push(`Invalid Wind Speed at row ${index + 1}`);
+        }
+        if (!this.isValidNonNegative(row.rainfall)) {
+          rowErrors.push(`Invalid Rainfall at row ${index + 1}`);
+        }
+        if (!this.isValidNonNegative(row.humidity)) {
+          rowErrors.push(`Invalid Humidity at row ${index + 1}`);
+        }
+
+        // Collect errors for each row
         if (rowErrors.length > 0) {
           errors.push({ rowNumber: index + 1, errors: rowErrors });
         } else {
-          // Fetch weather data to calculate Plant Start/Stop times
-          const times = await this.calculatePlantTimes(data.date);  // Await the calculation
-          data.startTime = times.startTime || data.startTime;
-          data.stopTime = times.stopTime || data.stopTime;
-          weatherData.push(data);
+          meterData.push(row);
         }
-      }
+      });
+
+      // Return the validated data and errors
+      return { meterData, errors };
+
     } catch (error) {
-      console.error('Error loading workbook:', error);
-      throw new Error('Error loading workbook.');
+      console.error('Error while parsing Excel:', error);
+      throw new Error('Failed to parse the Excel file');
     }
-
-    return { meterData: weatherData, errors };
-  }
-
-  // Row validation
-  validateRow(data: MeterData, rowNumber: number) {
-    const errors: string[] = [];
-
-    // Date and Time Format validation
-    if (!this.isValidDate(data.date)) {
-      errors.push('Invalid Date format (DD-MM-YYYY)');
-    }
-
-    if (!this.isValidTime(data.startTime)) {
-      errors.push('Invalid Start Time format (HH:MM)');
-    }
-
-    if (!this.isValidTime(data.stopTime)) {
-      errors.push('Invalid Stop Time format (HH:MM)');
-    }
-
-    // Export/Import Reading validation (must be numeric and non-negative)
-    if (data.exportReading < 0 || isNaN(data.exportReading)) {
-      errors.push('Invalid Export Reading (must be a positive number)');
-    }
-
-    if (data.importReading < 0 || isNaN(data.importReading)) {
-      errors.push('Invalid Import Reading (must be a positive number)');
-    }
-
-    return errors;
-  }
-
-  // Date format validation (DD-MM-YYYY)
-  isValidDate(date: string) {
-    const datePattern = /^\d{2}-\d{2}-\d{4}$/;
-    return datePattern.test(date);
-  }
-
-  // Time format validation (HH:MM)
-  isValidTime(time: string) {
-    const timePattern = /^\d{2}:\d{2}$/;
-    return timePattern.test(time);
-  }
-
-  // Function to calculate Plant Start/Stop times based on weather data
-  async calculatePlantTimes(date: string) {
-    const weatherData = await this.weatherService.getWeatherByDate(date);
-
-    if (!weatherData || weatherData.length === 0) {
-      return { startTime: '00:00', stopTime: '00:00' };
-    }
-
-    let plantStartTime = '00:00';
-    let plantStopTime = '00:00';
-
-    // Loop through weather data and calculate start/stop times based on POA values
-    for (const weatherRow of weatherData) {
-      if (weatherRow.poa >= 10 && !plantStartTime) {
-        plantStartTime = weatherRow.time;  // First time POA ≥ 10 W/m²
-      }
-      if (weatherRow.poa > 0 && weatherRow.poa < 50) {
-        plantStopTime = weatherRow.time;  // Last time POA > 0 and < 50 W/m²
-      }
-    }
-
-    return { startTime: plantStartTime, stopTime: plantStopTime };
   }
 }

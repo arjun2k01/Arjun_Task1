@@ -11,7 +11,7 @@ export class WeatherSubmitService {
   ) {}
 
   async submitRows(rows: Record<string, any>[]) {
-    if (!rows.length) {
+    if (!rows || rows.length === 0) {
       return {
         inserted: 0,
         skipped: 0,
@@ -23,17 +23,22 @@ export class WeatherSubmitService {
     let skipped = 0;
 
     for (const row of rows) {
-      const date = row['Date'];
-      const time = row['Time'];
+      // Get date and time from row (handle both casing)
+      const date = row['Date'] ?? row['date'];
+      const time = row['Time'] ?? row['time'];
 
+      // Skip rows without date or time
       if (!date || !time) {
         skipped++;
         continue;
       }
 
+      // Check if record already exists (prevent duplicates)
       const exists = await this.weatherModel.exists({
-        date,
-        time,
+        $or: [
+          { date, time },
+          { Date: date, Time: time },
+        ],
       });
 
       if (exists) {
@@ -41,29 +46,42 @@ export class WeatherSubmitService {
         continue;
       }
 
+      // Map row to schema fields
       docsToInsert.push({
         date,
         time,
-        poa: Number(row['POA']) || 0,
-        ghi: Number(row['GHI']) || 0,
-        albedoUp: Number(row['AlbedoUp']) || 0,
-        albedoDown: Number(row['AlbedoDown']) || 0,
-        moduleTemp: Number(row['ModuleTemp']) || 0,
-        ambientTemp: Number(row['AmbientTemp']) || 0,
-        windSpeed: Number(row['WindSpeed']) || 0,
-        rainfall: Number(row['Rainfall']) || 0,
-        humidity: Number(row['Humidity']) || 0,
+        poa: this.toNumber(row['POA']),
+        ghi: this.toNumber(row['GHI']),
+        albedoUp: this.toNumber(row['AlbedoUp']),
+        albedoDown: this.toNumber(row['AlbedoDown']),
+        moduleTemp: this.toNumber(row['ModuleTemp']),
+        ambientTemp: this.toNumber(row['AmbientTemp']),
+        windSpeed: this.toNumber(row['WindSpeed']),
+        rainfall: this.toNumber(row['Rainfall']),
+        humidity: this.toNumber(row['Humidity']),
       });
     }
 
+    // Bulk insert all valid documents
     if (docsToInsert.length > 0) {
-      await this.weatherModel.insertMany(docsToInsert);
+      await this.weatherModel.insertMany(docsToInsert, { ordered: false });
     }
 
     return {
       inserted: docsToInsert.length,
       skipped,
-      message: 'Weather data submission completed',
+      message: `Weather data submission completed. ${docsToInsert.length} inserted, ${skipped} skipped.`,
     };
+  }
+
+  /**
+   * Convert value to number, return 0 if invalid
+   */
+  private toNumber(value: any): number {
+    if (value === null || value === undefined || value === '') {
+      return 0;
+    }
+    const num = Number(value);
+    return isNaN(num) ? 0 : num;
   }
 }

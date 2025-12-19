@@ -1,125 +1,190 @@
 import { Injectable } from '@nestjs/common';
-import * as XLSX from 'xlsx'; // Ensure XLSX (SheetJS) is imported correctly
-
-export interface RowErrorDto {
-  rowNumber: number;
-  errors: string[];
-}
+import * as XLSX from 'xlsx';
 
 @Injectable()
 export class WeatherExcelService {
-  async parseAndValidate(fileBuffer: Buffer | Uint8Array) {
-    // Log to check if the buffer is valid
-    console.log('Loading workbook...');
-    
-    let weatherData: any[] = [];
-    const errors: RowErrorDto[] = [];
-    
-    try {
-      // Read the workbook using SheetJS
-      const workbook = XLSX.read(fileBuffer, { type: 'buffer' });
+  /**
+   * Parse Excel file and return all rows as objects
+   * Handles complex Excel files with merged headers
+   */
+  async parseExcel(fileBuffer: Buffer | Uint8Array): Promise<Record<string, any>[]> {
+    const workbook = XLSX.read(fileBuffer, { type: 'buffer' });
 
-      console.log('Workbook loaded successfully.');
+    // Get the first sheet
+    const sheetName = workbook.SheetNames[0];
+    const worksheet = workbook.Sheets[sheetName];
 
-      // Pick the first sheet from the workbook
-      const sheetName = workbook.SheetNames[0]; // You can use sheet index as well, e.g., `workbook.Sheets[0]`
-      const worksheet = workbook.Sheets[sheetName];
+    if (!worksheet) {
+      throw new Error('Worksheet not found in Excel file');
+    }
 
-      if (!worksheet) {
-        throw new Error('Worksheet not found.');
+    // First try standard parsing
+    let jsonData = XLSX.utils.sheet_to_json(worksheet, {
+      raw: false,
+      defval: '',
+    });
+
+    // Check if this is a complex Excel with merged headers
+    const firstRow = jsonData[0] as Record<string, any>;
+    const hasComplexHeaders = firstRow && (
+      Object.keys(firstRow).some(k => k.includes('__EMPTY')) ||
+      Object.keys(firstRow).some(k => k.includes('Date/Time')) ||
+      Object.keys(firstRow).some(k => k.includes('Irradiance'))
+    );
+
+    if (hasComplexHeaders) {
+      // Parse as raw array for complex Excel files
+      const rawData = XLSX.utils.sheet_to_json(worksheet, {
+        header: 1,
+        raw: false,
+        defval: '',
+      }) as any[][];
+
+      // Find the actual data start row (skip header rows)
+      let dataStartRow = 0;
+      for (let i = 0; i < Math.min(10, rawData.length); i++) {
+        const firstCell = String(rawData[i]?.[0] || '').trim();
+        // Check if it looks like a date (contains / or - with numbers, but not "Date")
+        if (
+          firstCell &&
+          !firstCell.toLowerCase().includes('date') &&
+          (/\d+[\/\-]\w+[\/\-]\d+/.test(firstCell) || /^\d{2}-[A-Za-z]{3}-\d{2}$/.test(firstCell))
+        ) {
+          dataStartRow = i;
+          break;
+        }
       }
 
-      // Convert worksheet to JSON data
-      const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, raw: false });
+      console.log(`[WeatherExcelService] Data starts at row ${dataStartRow}`);
+      console.log(`[WeatherExcelService] Total raw rows: ${rawData.length}`);
 
-      // Log worksheet details to ensure it's loaded correctly
-      console.log('Worksheet loaded:', sheetName);
-      console.log('Total rows in the worksheet:', jsonData.length);
-
-      // Process each row (skip header row)
-      jsonData.forEach((row: any, index: number) => {
-        if (index === 0) return; // Skip header row
-
-        const data = {
-          date: row[0],  // Adjust based on actual columns in your sheet
-          time: row[1],
-          poaPyranometer: row[2],
-          ghiPyranometer: row[3],
-          albedo: row[4],
-          moduleTemperature: row[5],
-          ambientTemperature: row[6],
-          windSpeed: row[7],
-          rainfall: row[8],
-          humidity: row[9],
+      // Map the raw data to standardized format
+      // Column mapping based on actual Excel structure:
+      // 0: Date, 1: Time, 2: POA1, 3: POA2, ... 20: GHI, ... 25-26: ModTemp, 31-32: AmbTemp, 36-37: WindSpeed, 41-42: Rainfall, 46-47: Humidity
+      const rows = rawData.slice(dataStartRow).map((row: any[]) => {
+        return {
+          Date: this.normalizeDate(row[0]),
+          Time: this.normalizeTime(row[1]),
+          POA: this.getFirstValidValue([row[2], row[3], row[4], row[5]]),
+          GHI: this.getFirstValidValue([row[20], row[21], row[22], row[23]]),
+          AlbedoUp: this.getFirstValidValue([row[7], row[10], row[13], row[16]]),
+          AlbedoDown: this.getFirstValidValue([row[8], row[11], row[14], row[17]]),
+          ModuleTemp: this.getFirstValidValue([row[25], row[26], row[27], row[28]]),
+          AmbientTemp: this.getFirstValidValue([row[31], row[32], row[33], row[34]]),
+          WindSpeed: this.getFirstValidValue([row[36], row[37], row[38], row[39]]),
+          Rainfall: this.getFirstValidValue([row[41], row[42], row[43], row[44]]),
+          Humidity: this.getFirstValidValue([row[46], row[47], row[48], row[49]]),
         };
+      }).filter(row => row.Date && row.Date.trim() !== '');
 
-        const rowErrors = this.validateRow(data, index + 1); // Validate row, include rowNumber as index+1
-        if (rowErrors.length > 0) {
-          errors.push({ rowNumber: index + 1, errors: rowErrors });
-        } else {
-          weatherData.push(data);
-        }
-      });
+      console.log(`[WeatherExcelService] Parsed ${rows.length} data rows`);
+      if (rows.length > 0) {
+        console.log(`[WeatherExcelService] First row:`, JSON.stringify(rows[0]));
+      }
 
-    } catch (error) {
-      console.error('Error loading workbook:', error);
-      throw new Error('Error loading workbook.');
+      return rows;
+    } else {
+      // Standard Excel format - map to standardized field names
+      const rows = jsonData.map((row: any) => {
+        return {
+          Date: this.normalizeDate(row['Date'] ?? row['date'] ?? row['DATE'] ?? ''),
+          Time: this.normalizeTime(row['Time'] ?? row['time'] ?? row['TIME'] ?? ''),
+          POA: row['POA'] ?? row['POA Pyranometer'] ?? row['poa'] ?? '',
+          GHI: row['GHI'] ?? row['GHI Pyranometer'] ?? row['ghi'] ?? '',
+          AlbedoUp: row['AlbedoUp'] ?? row['Albedo Up'] ?? row['Albedo (Up)'] ?? '',
+          AlbedoDown: row['AlbedoDown'] ?? row['Albedo Down'] ?? row['Albedo (Down)'] ?? '',
+          ModuleTemp: row['ModuleTemp'] ?? row['Module Temperature'] ?? row['Module Temp'] ?? '',
+          AmbientTemp: row['AmbientTemp'] ?? row['Ambient Temperature'] ?? row['Ambient Temp'] ?? '',
+          WindSpeed: row['WindSpeed'] ?? row['Wind Speed'] ?? row['windSpeed'] ?? '',
+          Rainfall: row['Rainfall'] ?? row['rainfall'] ?? '',
+          Humidity: row['Humidity'] ?? row['humidity'] ?? '',
+        };
+      }).filter((row: any) => row.Date && row.Date.trim() !== '');
+
+      console.log(`[WeatherExcelService] Parsed ${rows.length} data rows (standard format)`);
+      return rows;
     }
-
-    return { weatherData, errors };
   }
 
-  validateRow(data: any, rowNumber: number) {
-    const errors: string[] = [];
-
-    // Date validation (should be in DD-MM-YYYY format)
-    if (!this.isValidDate(data.date)) {
-      errors.push('Invalid Date format (DD-MM-YYYY)');
+  /**
+   * Get first non-empty value from array of potential values
+   */
+  private getFirstValidValue(values: any[]): string {
+    for (const v of values) {
+      if (v !== null && v !== undefined && v !== '') {
+        return String(v);
+      }
     }
-
-    // Time validation (should be in HH:MM format)
-    if (!this.isValidTime(data.time)) {
-      errors.push('Invalid Time format (HH:MM)');
-    }
-
-    // Validation logic for other fields
-    if (data.poaPyranometer < 0 || data.poaPyranometer > 1500) {
-      errors.push('POA Pyranometer value must be between 0 and 1500.');
-    }
-    if (data.ghiPyranometer < 0 || data.ghiPyranometer > 1500) {
-      errors.push('GHI Pyranometer value must be between 0 and 1500.');
-    }
-    if (data.albedo < 0 || data.albedo > 1500) {
-      errors.push('Albedo value must be between 0 and 1500.');
-    }
-    if (data.moduleTemperature <= 0) {
-      errors.push('Module Temperature must be greater than 0.');
-    }
-    if (data.ambientTemperature < 0) {
-      errors.push('Ambient Temperature must be greater than or equal to 0.');
-    }
-    if (data.windSpeed < 0) {
-      errors.push('Wind Speed must be greater than or equal to 0.');
-    }
-    if (data.rainfall < 0) {
-      errors.push('Rainfall must be greater than or equal to 0.');
-    }
-    if (data.humidity < 0) {
-      errors.push('Humidity must be greater than or equal to 0.');
-    }
-
-    return errors;
+    return '';
   }
 
-  // Date format validation
-  isValidDate(date: string) {
-    const datePattern = /^\d{2}-\d{2}-\d{4}$/;  // DD-MM-YYYY format
-    return datePattern.test(date);
+  /**
+   * Normalize date to DD-MMM-YY format
+   */
+  private normalizeDate(value: any): string {
+    if (!value) return '';
+    const str = String(value).trim();
+    
+    // Already in DD-MMM-YY format (e.g., 01-Dec-24)
+    if (/^\d{2}-[A-Za-z]{3}-\d{2}$/.test(str)) {
+      return str;
+    }
+
+    // Format: DD/Mon/YY (e.g., 22/Jun/25)
+    const match1 = str.match(/^(\d{1,2})\/([A-Za-z]{3})\/(\d{2,4})$/);
+    if (match1) {
+      const day = match1[1].padStart(2, '0');
+      const month = match1[2].charAt(0).toUpperCase() + match1[2].slice(1).toLowerCase();
+      const year = match1[3].slice(-2);
+      return `${day}-${month}-${year}`;
+    }
+
+    // Format: DD-MM-YYYY or DD/MM/YYYY
+    const match2 = str.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/);
+    if (match2) {
+      const day = match2[1].padStart(2, '0');
+      const monthNum = parseInt(match2[2], 10);
+      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      const month = months[monthNum - 1] || 'Jan';
+      const year = match2[3].slice(-2);
+      return `${day}-${month}-${year}`;
+    }
+
+    return str;
   }
 
-  // Time format validation
-  isValidTime(time: string) {
-    const timePattern = /^\d{2}:\d{2}$/;  // HH:MM format
-    return timePattern.test(time);
+  /**
+   * Normalize time to HH:MM format
+   */
+  private normalizeTime(value: any): string {
+    if (!value) return '';
+    const str = String(value).trim();
+
+    // Already in HH:MM format
+    if (/^\d{2}:\d{2}$/.test(str)) {
+      return str;
+    }
+
+    // Format: H:MM or HH:MM:SS
+    const match = str.match(/^(\d{1,2}):(\d{2})(?::\d{2})?$/);
+    if (match) {
+      const hours = match[1].padStart(2, '0');
+      const minutes = match[2];
+      return `${hours}:${minutes}`;
+    }
+
+    return str;
+  }
+
+  /**
+   * Legacy method - kept for backward compatibility
+   * @deprecated Use parseExcel() instead
+   */
+  async parseAndValidate(fileBuffer: Buffer | Uint8Array) {
+    const rows = await this.parseExcel(fileBuffer);
+    return {
+      weatherData: rows,
+      errors: [],
+    };
   }
 }
