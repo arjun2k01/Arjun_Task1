@@ -13,18 +13,6 @@ interface RowError {
   errors: string[];
 }
 
-interface UploadResponse {
-  rows: Record<string, any>[];
-  errors: RowError[];
-  isValid: boolean;
-}
-
-interface ValidateResponse {
-  rows: Record<string, any>[];
-  errors: RowError[];
-  isValid: boolean;
-}
-
 interface SubmitResponse {
   acknowledged: boolean;
   insertedCount: number;
@@ -53,7 +41,7 @@ function normalizeErrors(input: any): RowError[] {
 }
 
 /**
- * Normalize data from backend
+ * Normalize data from backend - handles multiple response formats
  */
 function normalizeData(input: any): Record<string, any>[] {
   if (Array.isArray(input)) return input;
@@ -125,8 +113,12 @@ export default function MeterUploadPage() {
 
       const result: any = await res.json();
 
-      const normalizedData = normalizeData(result?.rows ?? result?.data);
+      // Handle multiple response formats from backend
+      const normalizedData = normalizeData(result?.rows ?? result?.meterData ?? result?.data);
       const normalizedErrors = normalizeErrors(result?.errors);
+
+      console.log('[MeterUploadPage] Received data:', normalizedData.length, 'rows');
+      console.log('[MeterUploadPage] Received errors:', normalizedErrors.length);
 
       setData(normalizedData);
       setErrors(normalizedErrors);
@@ -138,10 +130,11 @@ export default function MeterUploadPage() {
         type: valid ? 'success' : 'info',
         title: valid ? 'Upload validated' : 'Upload needs fixes',
         message: valid
-          ? 'All rows are valid. You can submit to the database.'
+          ? `${normalizedData.length} rows are valid. You can submit to the database.`
           : `${normalizedErrors.length} row(s) have validation issues. Edit and re-validate.`,
       });
     } catch (err: any) {
+      console.error('[MeterUploadPage] Upload error:', err);
       pushToast({
         type: 'error',
         title: 'Upload failed',
@@ -160,6 +153,7 @@ export default function MeterUploadPage() {
       return updated;
     });
 
+    // Mark as invalid after editing - user must re-validate
     setIsValid(false);
     setSuccess(null);
   };
@@ -270,6 +264,7 @@ export default function MeterUploadPage() {
         message: `${totalAffected} record(s) saved to database.`,
       });
 
+      // Clear form after successful submission
       setData([]);
       setErrors([]);
       setIsValid(false);
@@ -292,6 +287,7 @@ export default function MeterUploadPage() {
 
       <Topbar title="Meter Excel Upload" subtitle="Upload, edit, validate, and submit meter data" />
 
+      {/* Upload Section */}
       <div className="surface p-6">
         <div className="flex items-start justify-between gap-4">
           <div>
@@ -324,22 +320,26 @@ export default function MeterUploadPage() {
         </div>
       </div>
 
+      {/* Preview & Edit Section */}
       {data.length > 0 && (
         <div className="surface p-6">
-          <h3 className="mb-4">Preview & Edit Data</h3>
+          <h3 className="mb-4">Preview & Edit Data ({data.length} rows)</h3>
           <p className="text-sm text-text-muted mb-4">
             Auto-calculated fields (Plant Start/Stop Time, Totals, GSS values) will be added after validation.
+            You can edit cells directly, then click "Re-Validate".
           </p>
           <EditablePreviewTable data={data} errors={errors} onCellChange={handleCellChange} />
         </div>
       )}
 
+      {/* Error Summary Section */}
       {errors.length > 0 && (
         <div className="surface p-6">
           <ErrorSummaryPanel errors={errors} />
         </div>
       )}
 
+      {/* Action Buttons */}
       {data.length > 0 && (
         <div className="flex items-center gap-4">
           <AnimatedButton variant="secondary" onClick={handleRevalidate} disabled={loading}>
@@ -352,6 +352,7 @@ export default function MeterUploadPage() {
         </div>
       )}
 
+      {/* Success Summary */}
       {success && (
         <div className="surface p-6">
           <h3 className="mb-2 text-success">Submission Successful</h3>

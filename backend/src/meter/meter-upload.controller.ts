@@ -1,21 +1,45 @@
-import { Controller, Post, UploadedFile, UseInterceptors } from '@nestjs/common';
+import {
+  Controller,
+  Post,
+  UploadedFile,
+  UseInterceptors,
+  BadRequestException,
+} from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { MeterExcelService } from './meter-excel.service';
-import { MeterData, RowErrorDto } from './meter-data.types';  // Import types from the new file
-import { BadRequestException } from '@nestjs/common';
+import { MeterValidateService } from './meter-validate.service';
 
-@Controller('meter/upload')
+@Controller('meter')
 export class MeterUploadController {
-  constructor(private readonly excelService: MeterExcelService) {}
+  constructor(
+    private readonly excelService: MeterExcelService,
+    private readonly validateService: MeterValidateService,
+  ) {}
 
-  @Post()
+  @Post('upload')
   @UseInterceptors(FileInterceptor('file'))
-  async uploadMeterExcel(@UploadedFile() file: Express.Multer.File): Promise<{ meterData: MeterData[], errors: RowErrorDto[] }> {
+  async uploadMeterExcel(@UploadedFile() file: Express.Multer.File) {
+    // Check if the file is provided
     if (!file) {
       throw new BadRequestException('Excel file is required');
     }
 
-    const { meterData, errors }: { meterData: MeterData[], errors: RowErrorDto[] } = await this.excelService.parseAndValidate(file.buffer);
-    return { meterData, errors };
+    try {
+      // Parse the Excel file to get all rows
+      const parsedRows = await this.excelService.parseExcel(file.buffer);
+
+      // Validate all rows and get enriched data with auto-calculated fields
+      const validationResult = await this.validateService.validateRows(parsedRows);
+
+      // Return all rows (for preview) along with validation errors
+      return {
+        rows: validationResult.rows,
+        errors: validationResult.errors,
+        isValid: validationResult.isValid,
+      };
+    } catch (error) {
+      console.error('[MeterUploadController] Error:', error);
+      throw new BadRequestException('Error processing the Excel file: ' + (error as Error).message);
+    }
   }
 }
