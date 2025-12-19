@@ -58,6 +58,7 @@ export default function WeatherUploadPage() {
   const [loading, setLoading] = useState(false);
   const [phase, setPhase] = useState<LoadingPhase>('idle');
   const [success, setSuccess] = useState<SubmitResponse | null>(null);
+  const [showErrorModal, setShowErrorModal] = useState(false);
 
   const downloadTemplate = () => {
     window.open(apiUrl('/weather/template'), '_blank');
@@ -94,6 +95,7 @@ export default function WeatherUploadPage() {
     setLoading(true);
     setPhase('upload');
     setSuccess(null);
+    setShowErrorModal(false);
 
     const formData = new FormData();
     formData.append('file', file);
@@ -111,7 +113,6 @@ export default function WeatherUploadPage() {
 
       const result: any = await res.json();
 
-      // Backend returns { weatherData, errors } from weather-upload.controller
       const normalizedData = normalizeData(result?.weatherData ?? result?.rows ?? result?.data);
       const normalizedErrors = normalizeErrors(result?.errors);
 
@@ -128,6 +129,11 @@ export default function WeatherUploadPage() {
           ? 'All rows are valid. You can submit to the database.'
           : `${normalizedErrors.length} row(s) have validation issues. Edit and re-validate.`,
       });
+
+      // Auto-show error modal if there are errors
+      if (normalizedErrors.length > 0) {
+        setShowErrorModal(true);
+      }
     } catch (err: any) {
       pushToast({
         type: 'error',
@@ -147,7 +153,6 @@ export default function WeatherUploadPage() {
       return updated;
     });
 
-    // Mark as invalid after editing - user must re-validate
     setIsValid(false);
     setSuccess(null);
   };
@@ -165,6 +170,7 @@ export default function WeatherUploadPage() {
     setLoading(true);
     setPhase('validate');
     setSuccess(null);
+    setShowErrorModal(false);
 
     try {
       const res = await fetch(apiUrl('/weather/validate'), {
@@ -180,11 +186,9 @@ export default function WeatherUploadPage() {
 
       const result: any = await res.json();
 
-      // Validation endpoint returns { rows, errors, isValid }
       const enrichedRows = normalizeData(result?.rows ?? result?.data);
       const normalizedErrors = normalizeErrors(result?.errors);
 
-      // Update data with enriched rows if available
       if (enrichedRows.length > 0) {
         setData(enrichedRows);
       }
@@ -201,6 +205,11 @@ export default function WeatherUploadPage() {
           ? 'All rows are valid. You can submit now.'
           : `${normalizedErrors.length} row(s) still have issues.`,
       });
+
+      // Auto-show error modal if there are errors
+      if (normalizedErrors.length > 0) {
+        setShowErrorModal(true);
+      }
     } catch (err: any) {
       pushToast({
         type: 'error',
@@ -250,7 +259,7 @@ export default function WeatherUploadPage() {
       const result: SubmitResponse = await res.json();
       setSuccess(result);
 
-      const totalAffected = (result.inserted ?? 0);
+      const totalAffected = result.inserted ?? 0;
 
       pushToast({
         type: 'success',
@@ -258,11 +267,11 @@ export default function WeatherUploadPage() {
         message: `${totalAffected} record(s) saved to database. ${result.skipped ?? 0} skipped (duplicates).`,
       });
 
-      // Clear form after successful submission
       setData([]);
       setErrors([]);
       setIsValid(false);
       setFile(null);
+      setShowErrorModal(false);
     } catch (err: any) {
       pushToast({
         type: 'error',
@@ -317,18 +326,84 @@ export default function WeatherUploadPage() {
       {/* Preview & Edit Section */}
       {data.length > 0 && (
         <div className="surface p-6">
-          <h3 className="mb-4">Preview & Edit Data</h3>
-          <p className="text-sm text-text-muted mb-4">
-            You can edit cells directly. After editing, click "Re-Validate" to check for errors.
-          </p>
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h3>Preview & Edit Data ({data.length} rows)</h3>
+              <p className="text-sm text-text-muted mt-1">
+                You can edit cells directly. After editing, click "Re-Validate" to check for errors.
+              </p>
+            </div>
+
+            {/* Show Errors Button */}
+            {errors.length > 0 && (
+              <button
+                onClick={() => setShowErrorModal(true)}
+                className="flex items-center gap-2 px-4 py-2 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 rounded-lg hover:bg-red-200 dark:hover:bg-red-900/50 transition-colors"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                Show Errors ({errors.length})
+              </button>
+            )}
+
+            {/* Valid Badge */}
+            {errors.length === 0 && data.length > 0 && (
+              <span className="flex items-center gap-2 px-4 py-2 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 rounded-lg">
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                </svg>
+                All Rows Valid
+              </span>
+            )}
+          </div>
+
           <EditablePreviewTable data={data} errors={errors} onCellChange={handleCellChange} />
         </div>
       )}
 
-      {/* Error Summary Section */}
-      {errors.length > 0 && (
-        <div className="surface p-6">
-          <ErrorSummaryPanel errors={errors} />
+      {/* Error Modal */}
+      {showErrorModal && errors.length > 0 && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white dark:bg-slate-800 rounded-xl shadow-2xl max-w-2xl w-full max-h-[80vh] flex flex-col">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between p-4 border-b border-slate-200 dark:border-slate-700">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-full bg-red-100 dark:bg-red-900/30 flex items-center justify-center">
+                  <svg className="w-6 h-6 text-red-600 dark:text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                </div>
+                <div>
+                  <h3 className="text-lg font-semibold">Validation Errors</h3>
+                  <p className="text-sm text-text-muted">{errors.length} row(s) need attention</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowErrorModal(false)}
+                className="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition-colors"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="flex-1 overflow-auto p-4">
+              <ErrorSummaryPanel errors={errors} />
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-4 border-t border-slate-200 dark:border-slate-700 flex justify-end gap-3">
+              <AnimatedButton variant="secondary" onClick={() => setShowErrorModal(false)}>
+                Close
+              </AnimatedButton>
+              <AnimatedButton variant="primary" onClick={() => { setShowErrorModal(false); }}>
+                Fix Errors in Table
+              </AnimatedButton>
+            </div>
+          </div>
         </div>
       )}
 
@@ -342,6 +417,12 @@ export default function WeatherUploadPage() {
           <AnimatedButton variant="primary" onClick={handleSubmit} disabled={!isValid || loading}>
             Submit to Database
           </AnimatedButton>
+
+          {errors.length > 0 && (
+            <span className="text-sm text-red-600 dark:text-red-400">
+              ⚠️ Fix {errors.length} error(s) before submitting
+            </span>
+          )}
         </div>
       )}
 
