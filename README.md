@@ -1,4 +1,38 @@
-# ☀️ Weather & Meter Data Management System
+    git clone <repository-url>
+    cd weather-meter-management
+    ```
+
+2.  **Environment Setup**:
+    Create a `.env` file in the root directory:
+    ```env
+    PORT=5000
+    MONGODB_URI=your_mongodb_connection_string
+    ```
+
+3.  **Install Dependencies**:
+    ```bash
+    # Install root and backend dependencies
+    npm install
+
+    # Install frontend dependencies
+    cd client && npm install
+    ```
+
+4.  **Run the Application**:
+    ```bash
+    # From the root directory to run both client and server
+    npm run dev
+    
+
+## 🛠️ Tech Stack & Benefits
+
+*   **Frontend**: React.js & Tailwind CSS – Delivers a responsive, intuitive interface for monitoring plant performance.
+*   **Backend**: Node.js & Express – Handles high-concurrency bulk uploads and complex data correlation logic efficiently.
+*   **Database**: MongoDB – Provides schema flexibility to accommodate varying data formats from different solar hardware.
+*   **Validation**: Zod & ExcelJS – Ensures strict data integrity and high-speed parsing of raw Excel datasets.
+
+**Why this stack?**
+This combination provides the scalability needed for large-scale data ingestion and the flexibility to handle evolving data schemas without the overhead of traditional relational migrations.
 
 > A high-performance full-stack application for managing solar plant data, validating complex datasets, and correlating energy production with environmental conditions.
 
