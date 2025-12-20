@@ -1,0 +1,236 @@
+TO DO
+
+Q1. Weather Module – CRUD + Excel Upload with Validation & Editable Preview
+
+Design and implement the complete Weather module with the following requirements:
+
+A. CRUD Functionality
+
+Implement Create, Read, Update, Delete operations for Weather records.
+
+B. Excel Upload Functionality
+
+Implement an Excel upload workflow that includes:
+
+Upload Excel File
+
+User can upload an Excel file containing Weather data.
+
+Preview Panel
+
+Display all rows from the uploaded file in a preview table.
+
+The preview panel must be editable so users can correct invalid data directly in the table.
+
+Validation Step (Validate Button)
+
+Provide a Validate button.
+
+When clicked:
+
+Validate all rows using the rules provided in the project documentation.
+
+Highlight rows that contain errors.
+
+Display clear error messages for each invalid row (e.g., “Row 5: Missing date”, “Row 8: Invalid meter value”).
+
+Submit Control
+
+Submit button remains disabled until validation passes with zero errors.
+
+If validation passes → enable Submit.
+
+If validation fails → keep Submit disabled and show errors.
+
+Final Submission
+
+Upon successful validation, save the corrected data to the database.
+
+
+
+Q2. Meter Data Module – CRUD + Excel Upload with Validation & Editable Preview
+
+Design and implement the complete Meter Data module with the following requirements:
+
+A. CRUD Functionality
+
+Implement Create, Read, Update, Delete operations for Meter Data records.
+
+B. Excel Upload Functionality
+
+Implement an Excel upload workflow that includes:
+
+Upload Excel File
+
+User can upload an Excel file containing Meter Data.
+
+Preview Panel
+
+Show the uploaded data in a preview table.
+
+Preview table must be editable so users can fix errors directly.
+
+Validation Step (Validate Button)
+
+Include a Validate button to check all rows.
+
+Validation must follow the rules mentioned in the documentation.
+
+For invalid rows:
+
+Highlight the row in red (or similar).
+
+Show error messages (e.g., “Row 3: Missing meter ID”, “Row 10: Invalid reading format”).
+
+Submit Control
+
+Submit button stays disabled until validation succeeds.
+
+If any row fails validation → keep it disabled and show the list of errors.
+
+Final Submission
+
+Allow saving data only after all validation errors have been resolved.
+
+
+
+Weather sheet validation
+
+Daily Data Weather Validation:
+
+1) Date & Time
+
+Date format: DD-MMM-YY (e.g., 01-Dec-24).
+
+Time format: HH:MM (24-hour, e.g., 09:30).
+
+Duplicate datetime: No duplicate date+time combinations within the file.
+
+1) 	POA Pyranometer (W/m²)
+
+Must be ≥ 0
+
+Must be ≤ 1500
+
+Zeros are permitted without triggering the “continuous” rule.
+
+2) 	GHI Pyranometer (W/m²)
+
+Must be ≥ 0
+
+Must be ≤ 1500
+
+Zeros are allowed.
+
+3) 	Albedo (Upward / Downward pyranometers) (W/m²)
+
+Each filled cell must be ≥ 0 and ≤ 1500.
+
+Zeros are allowed.
+
+4) 	Module Temperature (°C)
+
+Cannot be 0 at any time.
+
+Must be ≥ 0 (no negatives).
+
+5) 	Ambient Temperature (°C)
+
+Must be ≥ 0 (no negatives).
+
+Zeros are allowed.
+
+6) 	Wind Speed / Rainfall / Humidity
+
+Must be ≥ 0 (no negatives).
+
+Zeros are valid values.
+
+Meter Data sheet validation
+
+Daily Data Meter Data Validation:
+
+1. Date Format Validation 
+
+Format: DD-MM-YYYY (e.g., 01-12-2024)
+
+No duplicate dates allowed
+
+2. Time Format Validation 
+
+Start Time: HH:MM format (e.g., 09:30)
+
+Stop Time: HH:MM format (e.g., 17:30)
+
+Hours: 00-23, Minutes: 00-59
+
+3. Plant Operation Data 
+
+Each date must have either:
+
+Start/Stop times, OR
+
+Export/Import readings
+
+4. Export/Import Readings
+
+Must be numeric values
+
+No negative readings allowed
+
+ 
+
+Auto-Calculated Fields:
+
+1. Plant Start Time
+
+Logic: First time when POA Meter 1 ≥ 10 W/m²
+
+Source: Weather data for that date
+
+Default: "00:00" if no sufficient irradiance found
+
+2. Plant Stop Time
+
+Logic: Last time when POA Meter 1 > 0 and < 50 W/m²
+
+Fallback: If not found, use last reading where POA > 0
+
+Source: Weather data for that date
+
+Default: "00:00" if not found
+
+3. Total
+
+Formula: Stop Time - Start Time
+
+Format: HH:MM
+
+Handles: Overnight calculations (stop time on next day)
+
+4. Export Total
+
+Formula: (Final Reading - Initial Reading)
+
+Calculated for: Each Export meter
+
+5. Import Total
+
+Formula: (Final Reading - Initial Reading)
+
+Calculated for: Each Import meter
+
+6. GSS Export Total
+
+Calculation: Sum of all export totals for GSS meters
+
+7. GSS Import Total
+
+Calculation: Sum of all import totals for GSS meters
+
+8. Net Export @GSS
+
+Formula: GSS Export - GSS Import
+
+
+

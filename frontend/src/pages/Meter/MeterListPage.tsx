@@ -8,10 +8,22 @@ import RecordModal from '../../components/modals/RecordModal';
 import DeleteConfirmModal from '../../components/modals/DeleteConfirmModal';
 import { apiUrl } from '../../config/api';
 
+interface WeatherData {
+  poa: number | null;
+  ghi: number | null;
+  moduleTemp: number | null;
+  ambientTemp: number | null;
+  windSpeed: number | null;
+  rainfall: number | null;
+  humidity: number | null;
+}
+
 interface MeterRecord {
   _id: string;
   date: string;
   time: string;
+  startTime: string;
+  endTime: string;
   activeEnergyImport: number;
   activeEnergyExport: number;
   reactiveEnergyImport: number;
@@ -20,21 +32,27 @@ interface MeterRecord {
   current: number;
   frequency: number;
   powerFactor: number;
+  weatherData: WeatherData | null;
   createdAt?: string;
   updatedAt?: string;
 }
 
 const METER_COLUMNS = [
-  { key: 'date', label: 'Date', width: 110 },
-  { key: 'time', label: 'Time', width: 80 },
-  { key: 'activeEnergyImport', label: 'Active Import', width: 110 },
-  { key: 'activeEnergyExport', label: 'Active Export', width: 110 },
-  { key: 'reactiveEnergyImport', label: 'Reactive Import', width: 120 },
-  { key: 'reactiveEnergyExport', label: 'Reactive Export', width: 120 },
-  { key: 'voltage', label: 'Voltage (V)', width: 100 },
-  { key: 'current', label: 'Current (A)', width: 100 },
-  { key: 'frequency', label: 'Freq (Hz)', width: 90 },
-  { key: 'powerFactor', label: 'PF', width: 70 },
+  { key: 'date', label: 'Date', width: 100 },
+  { key: 'startTime', label: 'Start Time', width: 90 },
+  { key: 'endTime', label: 'End Time', width: 90 },
+  { key: 'activeEnergyImport', label: 'Active Import', width: 100 },
+  { key: 'activeEnergyExport', label: 'Active Export', width: 100 },
+  { key: 'reactiveEnergyImport', label: 'Reactive Import', width: 110 },
+  { key: 'reactiveEnergyExport', label: 'Reactive Export', width: 110 },
+  { key: 'voltage', label: 'Voltage (V)', width: 90 },
+  { key: 'current', label: 'Current (A)', width: 90 },
+  { key: 'frequency', label: 'Freq (Hz)', width: 80 },
+  { key: 'powerFactor', label: 'PF', width: 60 },
+  { key: 'weatherData.poa', label: 'POA (W/m²)', width: 100 },
+  { key: 'weatherData.ghi', label: 'GHI (W/m²)', width: 100 },
+  { key: 'weatherData.moduleTemp', label: 'Mod Temp (°C)', width: 110 },
+  { key: 'weatherData.ambientTemp', label: 'Amb Temp (°C)', width: 110 },
 ];
 
 const METER_FIELDS = [

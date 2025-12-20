@@ -10,6 +10,8 @@ import WeatherUploadPage from './pages/Weather/WeatherUploadPage';
 import WeatherListPage from './pages/Weather/WeatherListPage';
 import MeterUploadPage from './pages/Meter/MeterUploadPage';
 import MeterListPage from './pages/Meter/MeterListPage';
+import MeterErrorPage from './pages/Meter/MeterErrorPage'; // Added Import
+import WeatherErrorPage from './pages/Weather/WeatherErrorpage';
 
 function App() {
   return (
@@ -27,9 +29,11 @@ function App() {
                   {/* Weather */}
                   <Route path="/weather/upload" element={<WeatherUploadPage />} />
                   <Route path="/weather/list" element={<WeatherListPage />} />
+                  <Route path="/weather/errors" element={<WeatherErrorPage/>}/>
 
                   {/* Meter */}
                   <Route path="/meter/upload" element={<MeterUploadPage />} />
+                  <Route path="/meter/errors" element={<MeterErrorPage />} /> {/* Added Route */}
                   <Route path="/meter/list" element={<MeterListPage />} />
 
                   {/* Fallback */}

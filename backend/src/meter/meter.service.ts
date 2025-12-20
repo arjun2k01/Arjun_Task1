@@ -7,6 +7,7 @@ import {
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { Meter, MeterDocument } from './meter.schema';
+import { WeatherService } from '../weather/weather.service';
 
 interface FindAllOptions {
   startDate?: string;
@@ -15,12 +16,29 @@ interface FindAllOptions {
   skip?: number;
 }
 
+export interface WeatherData {
+  poa: number | null;
+  ghi: number | null;
+  moduleTemp: number | null;
+  ambientTemp: number | null;
+  windSpeed: number | null;
+  rainfall: number | null;
+  humidity: number | null;
+}
+
+export interface MeterWithWeather extends Meter {
+  startTime: string;
+  endTime: string;
+  weatherData: WeatherData | null;
+}
+
 @Injectable()
 export class MeterService {
   constructor(
     @InjectModel(Meter.name)
     private readonly meterModel: Model<MeterDocument>,
-  ) {}
+    private readonly weatherService: WeatherService,
+  ) { }
 
   // CREATE
   async create(createMeterDto: Record<string, any>): Promise<Meter> {
@@ -54,8 +72,8 @@ export class MeterService {
     }
   }
 
-  // READ ALL with filters
-  async findAll(options: FindAllOptions = {}): Promise<{ data: Meter[]; total: number }> {
+  // READ ALL with filters - includes correlated weather data
+  async findAll(options: FindAllOptions = {}): Promise<{ data: MeterWithWeather[]; total: number }> {
     const { startDate, endDate, limit = 100, skip = 0 } = options;
 
     const filter: Record<string, any> = {};
@@ -66,7 +84,7 @@ export class MeterService {
       if (endDate) filter.date.$lte = endDate;
     }
 
-    const [data, total] = await Promise.all([
+    const [meterData, total] = await Promise.all([
       this.meterModel
         .find(filter)
         .sort({ date: -1, time: -1 })
@@ -77,8 +95,127 @@ export class MeterService {
       this.meterModel.countDocuments(filter).exec(),
     ]);
 
-    return { data, total };
+    // Get unique dates and batch fetch weather data
+    const uniqueDates = Array.from(new Set(meterData.map((m) => m.date)));
+    const weatherByDate = new Map<string, any[]>();
+
+    // Batch fetch all weather data for unique dates
+    for (const date of uniqueDates) {
+      try {
+        const weatherRecords = await this.weatherService.getWeatherByDate(date);
+        weatherByDate.set(date, weatherRecords || []);
+      } catch {
+        weatherByDate.set(date, []);
+      }
+    }
+
+    // Enrich meter data with weather correlation
+    const enrichedData: MeterWithWeather[] = meterData.map((meter) => {
+      const weatherRecords = weatherByDate.get(meter.date) || [];
+
+      // Calculate Plant Start Time: First time when POA >= 10 W/m²
+      const startTime = this.calculatePlantStartTime(weatherRecords);
+
+      // Calculate Plant Stop Time: Last time when POA > 0 and < 50 W/m²
+      const endTime = this.calculatePlantStopTime(weatherRecords);
+
+      // Get weather data for current meter time
+      const weatherData = this.extractWeatherData(weatherRecords, meter.time);
+
+      return {
+        ...meter,
+        startTime,
+        endTime,
+        weatherData,
+      } as MeterWithWeather;
+    });
+
+    return { data: enrichedData, total };
   }
+
+  // Helper: Calculate Plant Start Time - first time when POA >= 10 W/m²
+  private calculatePlantStartTime(weatherRecords: any[]): string {
+    if (!weatherRecords || weatherRecords.length === 0) {
+      return '00:00';
+    }
+
+    // Sort by time ascending
+    const sorted = [...weatherRecords].sort((a, b) => {
+      const timeA = a.time || a.Time || '00:00';
+      const timeB = b.time || b.Time || '00:00';
+      return timeA.localeCompare(timeB);
+    });
+
+    // Find first time when POA >= 10
+    for (const record of sorted) {
+      const poa = Number(record.poa ?? record.POA ?? 0);
+      if (poa >= 10) {
+        return record.time || record.Time || '00:00';
+      }
+    }
+
+    return '00:00';
+  }
+
+  // Helper: Calculate Plant Stop Time - last time when POA > 0 and < 50 W/m²
+  private calculatePlantStopTime(weatherRecords: any[]): string {
+    if (!weatherRecords || weatherRecords.length === 0) {
+      return '00:00';
+    }
+
+    // Sort by time descending
+    const sorted = [...weatherRecords].sort((a, b) => {
+      const timeA = a.time || a.Time || '00:00';
+      const timeB = b.time || b.Time || '00:00';
+      return timeB.localeCompare(timeA);
+    });
+
+    // Find last time when POA > 0 and < 50 (scanning from end)
+    for (const record of sorted) {
+      const poa = Number(record.poa ?? record.POA ?? 0);
+      if (poa > 0 && poa < 50) {
+        return record.time || record.Time || '00:00';
+      }
+    }
+
+    // Fallback: last time when POA > 0
+    for (const record of sorted) {
+      const poa = Number(record.poa ?? record.POA ?? 0);
+      if (poa > 0) {
+        return record.time || record.Time || '00:00';
+      }
+    }
+
+    return '00:00';
+  }
+
+  // Helper: Extract weather data for specific time
+  private extractWeatherData(weatherRecords: any[], time: string): WeatherData | null {
+    if (!weatherRecords || weatherRecords.length === 0) {
+      return null;
+    }
+
+    // Try to find exact time match first
+    const exactMatch = weatherRecords.find(
+      (w) => (w.time || w.Time) === time
+    );
+    const weather = exactMatch || weatherRecords[0];
+
+    if (!weather) {
+      return null;
+    }
+
+    return {
+      poa: weather.poa ?? weather.POA ?? null,
+      ghi: weather.ghi ?? weather.GHI ?? null,
+      moduleTemp: weather.moduleTemp ?? weather.ModuleTemp ?? null,
+      ambientTemp: weather.ambientTemp ?? weather.AmbientTemp ?? null,
+      windSpeed: weather.windSpeed ?? weather.WindSpeed ?? null,
+      rainfall: weather.rainfall ?? weather.Rainfall ?? null,
+      humidity: weather.humidity ?? weather.Humidity ?? null,
+    };
+  }
+
 
   // READ ONE by ID
   async findOne(id: string): Promise<Meter | null> {

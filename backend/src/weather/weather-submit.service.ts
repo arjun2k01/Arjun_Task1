@@ -8,18 +8,20 @@ export class WeatherSubmitService {
   constructor(
     @InjectModel(Weather.name)
     private readonly weatherModel: Model<WeatherDocument>,
-  ) {}
+  ) { }
 
   async submitRows(rows: Record<string, any>[]) {
     if (!rows || rows.length === 0) {
       return {
         inserted: 0,
+        updated: 0,
         skipped: 0,
         message: 'No data provided',
       };
     }
 
-    const docsToInsert: any[] = [];
+    // OPTIMIZATION: Use bulkWrite with upsert instead of checking existence per row
+    const ops: any[] = [];
     let skipped = 0;
 
     for (const row of rows) {
@@ -33,21 +35,8 @@ export class WeatherSubmitService {
         continue;
       }
 
-      // Check if record already exists (prevent duplicates)
-      const exists = await this.weatherModel.exists({
-        $or: [
-          { date, time },
-          { Date: date, Time: time },
-        ],
-      });
-
-      if (exists) {
-        skipped++;
-        continue;
-      }
-
       // Map row to schema fields
-      docsToInsert.push({
+      const doc = {
         date,
         time,
         poa: this.toNumber(row['POA']),
@@ -59,18 +48,37 @@ export class WeatherSubmitService {
         windSpeed: this.toNumber(row['WindSpeed']),
         rainfall: this.toNumber(row['Rainfall']),
         humidity: this.toNumber(row['Humidity']),
+      };
+
+      // Use upsert to handle duplicates automatically
+      ops.push({
+        updateOne: {
+          filter: { date, time },
+          update: { $set: doc },
+          upsert: true,
+        },
       });
     }
 
-    // Bulk insert all valid documents
-    if (docsToInsert.length > 0) {
-      await this.weatherModel.insertMany(docsToInsert, { ordered: false });
+    // Bulk write all operations in one call with unordered for max performance
+    let result = { insertedCount: 0, modifiedCount: 0, upsertedCount: 0 };
+    if (ops.length > 0) {
+      const bulkResult = await this.weatherModel.bulkWrite(ops, { ordered: false });
+      result = {
+        insertedCount: bulkResult.insertedCount ?? 0,
+        modifiedCount: bulkResult.modifiedCount ?? 0,
+        upsertedCount: bulkResult.upsertedCount ?? 0,
+      };
     }
 
+    const totalInserted = result.upsertedCount;
+    const totalUpdated = result.modifiedCount;
+
     return {
-      inserted: docsToInsert.length,
+      inserted: totalInserted,
+      updated: totalUpdated,
       skipped,
-      message: `Weather data submission completed. ${docsToInsert.length} inserted, ${skipped} skipped.`,
+      message: `Weather data submission completed. ${totalInserted} inserted, ${totalUpdated} updated, ${skipped} skipped.`,
     };
   }
 

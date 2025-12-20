@@ -11,10 +11,10 @@ async function bootstrap() {
 
   // ✅ Enable CORS for React dev server
   app.enableCors({
-    origin: 'http://localhost:3001',
+    origin: ['http://localhost:3001', 'http://localhost:3002', 'http://localhost:3000'],
     credentials: true,
-    methods: ['GET','POST','PUT','PATCH','DELETE','OPTIONS'],
-    allowedHeaders: ['Content-Type','Authorization'],
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
   });
 
   await app.listen(process.env.PORT ?? 3000);

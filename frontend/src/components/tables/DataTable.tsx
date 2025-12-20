@@ -106,7 +106,7 @@ export default function DataTable<T extends Record<string, any>>({
                 </td>
                 {columns.map((col) => (
                   <td key={col.key} className="px-3 py-2 whitespace-nowrap">
-                    {formatValue(row[col.key])}
+                    {formatValue(getNestedValue(row, col.key))}
                   </td>
                 ))}
                 <td className="px-3 py-2">
@@ -134,6 +134,10 @@ export default function DataTable<T extends Record<string, any>>({
       </table>
     </div>
   );
+}
+
+function getNestedValue(obj: any, key: string): any {
+  return key.split('.').reduce((acc, part) => acc?.[part], obj);
 }
 
 function formatValue(value: any): string {

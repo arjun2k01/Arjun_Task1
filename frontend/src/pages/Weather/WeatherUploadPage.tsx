@@ -1,8 +1,8 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
 import Topbar from '../../components/layout/Topbar';
 import AnimatedButton from '../../components/common/AnimatedButton';
 import EditablePreviewTable from '../../components/tables/EditablePreviewTable';
-import ErrorSummaryPanel from '../../components/tables/ErrorSummaryPanel';
 import { useToast } from '../../components/common/ToastProvider';
 import LoadingOverlay from '../../components/common/LoadingOverlay';
 import FileDropzone from '../../components/common/FileDropzone';
@@ -35,7 +35,8 @@ function normalizeErrors(input: any): RowError[] {
       }
       return null;
     })
-    .filter(Boolean) as RowError[];
+    .filter((e): e is RowError => e !== null)
+    .sort((a, b) => a.rowNumber - b.rowNumber);
 }
 
 /**
@@ -50,18 +51,33 @@ type LoadingPhase = 'idle' | 'upload' | 'validate' | 'submit';
 
 export default function WeatherUploadPage() {
   const { pushToast } = useToast();
+  const navigate = useNavigate();
+  const location = useLocation();
 
-  const [file, setFile] = useState<File | null>(null);
-  const [data, setData] = useState<Record<string, any>[]>([]);
-  const [errors, setErrors] = useState<RowError[]>([]);
+  // Initialize state from location.state if available (preserves data when returning from Error Page)
+  const [data, setData] = useState<Record<string, any>[]>(location.state?.data || []);
+  const [errors, setErrors] = useState<RowError[]>(location.state?.errors || []);
   const [isValid, setIsValid] = useState(false);
+  
+  const [file, setFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
   const [phase, setPhase] = useState<LoadingPhase>('idle');
   const [success, setSuccess] = useState<SubmitResponse | null>(null);
-  const [showErrorModal, setShowErrorModal] = useState(false);
+
+  // Recalculate isValid on mount or when data changes
+  useEffect(() => {
+    if (data.length > 0) {
+      setIsValid(errors.length === 0);
+    }
+  }, [data, errors]);
 
   const downloadTemplate = () => {
     window.open(apiUrl('/weather/template'), '_blank');
+  };
+
+  // Navigate to separate error page
+  const handleViewErrors = () => {
+    navigate('/weather/errors', { state: { data, errors } });
   };
 
   const overlayTitle =
@@ -95,7 +111,6 @@ export default function WeatherUploadPage() {
     setLoading(true);
     setPhase('upload');
     setSuccess(null);
-    setShowErrorModal(false);
 
     const formData = new FormData();
     formData.append('file', file);
@@ -127,13 +142,9 @@ export default function WeatherUploadPage() {
         title: valid ? 'Upload validated' : 'Upload needs fixes',
         message: valid
           ? 'All rows are valid. You can submit to the database.'
-          : `${normalizedErrors.length} row(s) have validation issues. Edit and re-validate.`,
+          : `${normalizedErrors.length} row(s) have validation issues.`,
       });
 
-      // Auto-show error modal if there are errors
-      if (normalizedErrors.length > 0) {
-        setShowErrorModal(true);
-      }
     } catch (err: any) {
       pushToast({
         type: 'error',
@@ -170,7 +181,6 @@ export default function WeatherUploadPage() {
     setLoading(true);
     setPhase('validate');
     setSuccess(null);
-    setShowErrorModal(false);
 
     try {
       const res = await fetch(apiUrl('/weather/validate'), {
@@ -206,10 +216,6 @@ export default function WeatherUploadPage() {
           : `${normalizedErrors.length} row(s) still have issues.`,
       });
 
-      // Auto-show error modal if there are errors
-      if (normalizedErrors.length > 0) {
-        setShowErrorModal(true);
-      }
     } catch (err: any) {
       pushToast({
         type: 'error',
@@ -271,7 +277,6 @@ export default function WeatherUploadPage() {
       setErrors([]);
       setIsValid(false);
       setFile(null);
-      setShowErrorModal(false);
     } catch (err: any) {
       pushToast({
         type: 'error',
@@ -334,76 +339,33 @@ export default function WeatherUploadPage() {
               </p>
             </div>
 
-            {/* Show Errors Button */}
-            {errors.length > 0 && (
-              <button
-                onClick={() => setShowErrorModal(true)}
-                className="flex items-center gap-2 px-4 py-2 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 rounded-lg hover:bg-red-200 dark:hover:bg-red-900/50 transition-colors"
-              >
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-                Show Errors ({errors.length})
-              </button>
-            )}
+            {/* Error Actions */}
+            <div className="flex items-center gap-3">
+              {errors.length > 0 && (
+                <button
+                  onClick={handleViewErrors}
+                  className="flex items-center gap-2 px-4 py-2 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 rounded-lg hover:bg-red-200 dark:hover:bg-red-900/50 transition-colors font-medium"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  View All {errors.length} Errors in Separate Page
+                </button>
+              )}
 
-            {/* Valid Badge */}
-            {errors.length === 0 && data.length > 0 && (
-              <span className="flex items-center gap-2 px-4 py-2 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 rounded-lg">
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                </svg>
-                All Rows Valid
-              </span>
-            )}
+              {/* Valid Badge */}
+              {errors.length === 0 && (
+                <span className="flex items-center gap-2 px-4 py-2 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 rounded-lg">
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                  </svg>
+                  All Rows Valid
+                </span>
+              )}
+            </div>
           </div>
 
           <EditablePreviewTable data={data} errors={errors} onCellChange={handleCellChange} />
-        </div>
-      )}
-
-      {/* Error Modal */}
-      {showErrorModal && errors.length > 0 && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white dark:bg-slate-800 rounded-xl shadow-2xl max-w-2xl w-full max-h-[80vh] flex flex-col">
-            {/* Modal Header */}
-            <div className="flex items-center justify-between p-4 border-b border-slate-200 dark:border-slate-700">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-full bg-red-100 dark:bg-red-900/30 flex items-center justify-center">
-                  <svg className="w-6 h-6 text-red-600 dark:text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
-                </div>
-                <div>
-                  <h3 className="text-lg font-semibold">Validation Errors</h3>
-                  <p className="text-sm text-text-muted">{errors.length} row(s) need attention</p>
-                </div>
-              </div>
-              <button
-                onClick={() => setShowErrorModal(false)}
-                className="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition-colors"
-              >
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-
-            {/* Modal Body */}
-            <div className="flex-1 overflow-auto p-4">
-              <ErrorSummaryPanel errors={errors} />
-            </div>
-
-            {/* Modal Footer */}
-            <div className="p-4 border-t border-slate-200 dark:border-slate-700 flex justify-end gap-3">
-              <AnimatedButton variant="secondary" onClick={() => setShowErrorModal(false)}>
-                Close
-              </AnimatedButton>
-              <AnimatedButton variant="primary" onClick={() => { setShowErrorModal(false); }}>
-                Fix Errors in Table
-              </AnimatedButton>
-            </div>
-          </div>
         </div>
       )}
 

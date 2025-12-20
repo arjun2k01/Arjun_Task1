@@ -4,7 +4,7 @@ import { Connection, Model } from 'mongoose';
 
 type RowError = { rowNumber: number; errors: string[] };
 
-const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'] as const;
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'] as const;
 
 function pad2(n: number) {
   return String(n).padStart(2, '0');
@@ -81,7 +81,7 @@ function toNumberOrNull(v: any) {
 export class MeterValidateService {
   private weatherModel: Model<any> | null = null;
 
-  constructor(@InjectConnection() private readonly connection: Connection) {}
+  constructor(@InjectConnection() private readonly connection: Connection) { }
 
   private getWeatherModel(): Model<any> {
     if (this.weatherModel) return this.weatherModel;
@@ -115,24 +115,39 @@ export class MeterValidateService {
     const Weather = this.getWeatherModel();
     const weatherByDate = new Map<string, any[]>();
 
-    for (const d of uniqueDates) {
-      const iso = ddmmyyyyToISO(d);
-      const ddmmyy = ddmmyyyyToDDMMMYY(d);
-
-      // Weather date might be stored as ISO or DD-MMM-YY (your strict weather requirement).
-      // So we query using both, and both Date/date keys.
-      const weatherRows = await Weather.find({
-        $or: [
+    // OPTIMIZATION: Batch fetch all weather data in a single query instead of per-date queries
+    if (uniqueDates.length > 0) {
+      const dateConditions = uniqueDates.flatMap((d) => {
+        const iso = ddmmyyyyToISO(d);
+        const ddmmyy = ddmmyyyyToDDMMMYY(d);
+        return [
           { Date: iso },
           { Date: ddmmyy },
           { date: iso },
           { date: ddmmyy },
-        ],
-      })
+        ];
+      });
+
+      const allWeatherRows = await Weather.find({ $or: dateConditions })
         .lean()
         .exec();
 
-      weatherByDate.set(d, Array.isArray(weatherRows) ? weatherRows : []);
+      // Group weather rows by date
+      for (const w of allWeatherRows) {
+        const dateVal = w.Date || w.date || '';
+        // Find which uniqueDate this matches
+        for (const d of uniqueDates) {
+          const iso = ddmmyyyyToISO(d);
+          const ddmmyy = ddmmyyyyToDDMMMYY(d);
+          if (dateVal === iso || dateVal === ddmmyy) {
+            if (!weatherByDate.has(d)) {
+              weatherByDate.set(d, []);
+            }
+            weatherByDate.get(d)!.push(w);
+            break;
+          }
+        }
+      }
     }
 
     const enrichedRows = rows.map((row, index) => {
@@ -152,7 +167,7 @@ export class MeterValidateService {
 
       // -------- 2) Time format validation (if present) --------
       const startTimeUser = normalizeHHMM(row?.['Start Time'] ?? row?.['StartTime'] ?? row?.['Start']);
-      const stopTimeUser  = normalizeHHMM(row?.['Stop Time']  ?? row?.['StopTime']  ?? row?.['Stop']);
+      const stopTimeUser = normalizeHHMM(row?.['Stop Time'] ?? row?.['StopTime'] ?? row?.['Stop']);
 
       if (startTimeUser && !isValidHHMM(startTimeUser)) rowErrors.push('Start Time must be HH:MM (24-hour)');
       if (stopTimeUser && !isValidHHMM(stopTimeUser)) rowErrors.push('Stop Time must be HH:MM (24-hour)');

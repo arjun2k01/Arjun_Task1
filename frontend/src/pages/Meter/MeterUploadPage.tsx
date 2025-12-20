@@ -1,8 +1,8 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react'; // Added useEffect
+import { useNavigate, useLocation } from 'react-router-dom'; // Added hooks
 import Topbar from '../../components/layout/Topbar';
 import AnimatedButton from '../../components/common/AnimatedButton';
 import EditablePreviewTable from '../../components/tables/EditablePreviewTable';
-import ErrorSummaryPanel from '../../components/tables/ErrorSummaryPanel';
 import { useToast } from '../../components/common/ToastProvider';
 import LoadingOverlay from '../../components/common/LoadingOverlay';
 import FileDropzone from '../../components/common/FileDropzone';
@@ -37,12 +37,12 @@ function normalizeErrors(input: any): RowError[] {
       }
       return null;
     })
-    .filter((e): e is RowError => e !== null) // Ensure null values are excluded
-    .sort((a, b) => a.rowNumber - b.rowNumber); // Ensure sorting by rowNumber
+    .filter((e): e is RowError => e !== null)
+    .sort((a, b) => a.rowNumber - b.rowNumber);
 }
 
 /**
- * Normalize data from backend - handles multiple response formats
+ * Normalize data from backend
  */
 function normalizeData(input: any): Record<string, any>[] {
   if (Array.isArray(input)) return input;
@@ -53,38 +53,52 @@ type LoadingPhase = 'idle' | 'upload' | 'validate' | 'submit';
 
 export default function MeterUploadPage() {
   const { pushToast } = useToast();
+  const navigate = useNavigate();
+  const location = useLocation(); // Hook for checking history state
+
+  // Initialize state from location.state if available (preserves data when returning from Error Page)
+  const [data, setData] = useState<Record<string, any>[]>(location.state?.data || []);
+  const [errors, setErrors] = useState<RowError[]>(location.state?.errors || []);
+  const [isValid, setIsValid] = useState(false);
 
   const [file, setFile] = useState<File | null>(null);
-  const [data, setData] = useState<Record<string, any>[]>([]);
-  const [errors, setErrors] = useState<RowError[]>([]);
-  const [isValid, setIsValid] = useState(false);
   const [loading, setLoading] = useState(false);
   const [phase, setPhase] = useState<LoadingPhase>('idle');
   const [success, setSuccess] = useState<SubmitResponse | null>(null);
-  const [showErrorModal, setShowErrorModal] = useState(false);
-  const [showOnlyErrors, setShowOnlyErrors] = useState(false); // Track whether to show only errors
+
+  // Recalculate isValid on mount if data exists
+  useEffect(() => {
+    if (data.length > 0) {
+      setIsValid(errors.length === 0);
+    }
+  }, [data, errors]);
 
   const downloadTemplate = () => {
     window.open(apiUrl('/meter/template'), '_blank');
+  };
+
+  const handleViewErrors = () => {
+    // Navigate to separate error page, passing current data and errors in state
+    navigate('/meter/errors', { state: { data, errors } });
   };
 
   const overlayTitle =
     phase === 'upload'
       ? 'Uploading & parsing Excel…'
       : phase === 'validate'
-      ? 'Validating rows…'
-      : phase === 'submit'
-      ? 'Submitting to database…'
-      : 'Processing…';
+        ? 'Validating rows…'
+        : phase === 'submit'
+          ? 'Submitting to database…'
+          : 'Processing…';
 
   const overlaySubtitle =
     phase === 'upload'
       ? 'Reading the file and converting it into rows.'
       : phase === 'validate'
-      ? 'Checking schema rules and calculating auto-fields.'
-      : phase === 'submit'
-      ? 'Saving valid rows and skipping duplicates.'
-      : 'Please wait.';
+        ? 'Checking schema rules and calculating auto-fields.'
+        : phase === 'submit'
+          ? 'Saving valid rows and skipping duplicates.'
+          : 'Please wait.';
 
   const handleUpload = async () => {
     if (!file) {
@@ -99,7 +113,6 @@ export default function MeterUploadPage() {
     setLoading(true);
     setPhase('upload');
     setSuccess(null);
-    setShowErrorModal(false);
 
     const formData = new FormData();
     formData.append('file', file);
@@ -120,9 +133,6 @@ export default function MeterUploadPage() {
       const normalizedData = normalizeData(result?.rows ?? result?.meterData ?? result?.data);
       const normalizedErrors = normalizeErrors(result?.errors);
 
-      console.log('[MeterUploadPage] Received data:', normalizedData.length, 'rows');
-      console.log('[MeterUploadPage] Received errors:', normalizedErrors.length);
-
       setData(normalizedData);
       setErrors(normalizedErrors);
 
@@ -134,13 +144,9 @@ export default function MeterUploadPage() {
         title: valid ? 'Upload validated' : 'Upload needs fixes',
         message: valid
           ? `${normalizedData.length} rows are valid. You can submit to the database.`
-          : `${normalizedErrors.length} row(s) have validation issues. Edit and re-validate.`,
+          : `${normalizedErrors.length} row(s) have validation issues.`,
       });
 
-      // Auto-show error modal if there are errors
-      if (normalizedErrors.length > 0) {
-        setShowErrorModal(true);
-      }
     } catch (err: any) {
       console.error('[MeterUploadPage] Upload error:', err);
       pushToast({
@@ -165,6 +171,34 @@ export default function MeterUploadPage() {
     setSuccess(null);
   };
 
+  const handleDeleteRows = (indices: number[]) => {
+    // Sort indices in descending order to remove from end first
+    const sortedIndices = [...indices].sort((a, b) => b - a);
+
+    setData((prev) => {
+      const updated = [...prev];
+      sortedIndices.forEach((index) => {
+        updated.splice(index, 1);
+      });
+      return updated;
+    });
+
+    // Clear errors for deleted rows and re-index remaining errors
+    setErrors((prev) => {
+      // Filter out errors for deleted rows and adjust row numbers
+      const deletedRowNumbers = new Set(sortedIndices.map(i => i + 2)); // +2 because rowNumber is 1-indexed + header
+      return prev
+        .filter(e => !deletedRowNumbers.has(e.rowNumber))
+        .map(e => ({
+          ...e,
+          rowNumber: e.rowNumber - sortedIndices.filter(i => i + 2 < e.rowNumber).length
+        }));
+    });
+
+    setIsValid(false);
+    setSuccess(null);
+  };
+
   const handleRevalidate = async () => {
     if (!data.length) {
       pushToast({
@@ -178,7 +212,6 @@ export default function MeterUploadPage() {
     setLoading(true);
     setPhase('validate');
     setSuccess(null);
-    setShowErrorModal(false);
 
     try {
       const res = await fetch(apiUrl('/meter/validate'), {
@@ -210,14 +243,10 @@ export default function MeterUploadPage() {
         type: valid ? 'success' : 'info',
         title: valid ? 'Validation passed' : 'Validation failed',
         message: valid
-          ? 'All rows are valid. Auto-calculated fields have been added. You can submit now.'
+          ? 'All rows are valid. You can submit now.'
           : `${normalizedErrors.length} row(s) still have issues.`,
       });
 
-      // Auto-show error modal if there are errors
-      if (normalizedErrors.length > 0) {
-        setShowErrorModal(true);
-      }
     } catch (err: any) {
       pushToast({
         type: 'error',
@@ -231,23 +260,7 @@ export default function MeterUploadPage() {
   };
 
   const handleSubmit = async () => {
-    if (!data.length) {
-      pushToast({
-        type: 'info',
-        title: 'Nothing to submit',
-        message: 'Upload and validate a file first.',
-      });
-      return;
-    }
-
-    if (!isValid) {
-      pushToast({
-        type: 'error',
-        title: 'Cannot submit',
-        message: 'Please re-validate and fix errors before submitting.',
-      });
-      return;
-    }
+    if (!data.length || !isValid) return;
 
     setLoading(true);
     setPhase('submit');
@@ -279,7 +292,6 @@ export default function MeterUploadPage() {
       setErrors([]);
       setIsValid(false);
       setFile(null);
-      setShowErrorModal(false);
     } catch (err: any) {
       pushToast({
         type: 'error',
@@ -291,9 +303,6 @@ export default function MeterUploadPage() {
       setPhase('idle');
     }
   };
-
-  // Show only errors when the user clicks "Show Errors"
-  const filteredData = showOnlyErrors ? data.filter((_, index) => errors.some((error) => error.rowNumber === index + 1)) : data;
 
   return (
     <div className="flex flex-col gap-6">
@@ -307,7 +316,7 @@ export default function MeterUploadPage() {
           <div>
             <h3 className="mb-2">Upload Excel File</h3>
             <p className="mb-4">
-              Upload a meter Excel file. Fix validation errors directly in the table before submitting to the database.
+              Upload a meter Excel file. Fix validation errors directly in the table before submitting.
             </p>
           </div>
 
@@ -341,80 +350,37 @@ export default function MeterUploadPage() {
             <div>
               <h3>Preview & Edit Data ({data.length} rows)</h3>
               <p className="text-sm text-text-muted mt-1">
-                Auto-calculated fields (Plant Start/Stop, Totals, GSS values) are added after validation.
+                Auto-calculated fields are added after validation.
               </p>
             </div>
 
-            {/* Show Errors Button */}
-            {errors.length > 0 && (
-              <button
-                onClick={() => setShowOnlyErrors(!showOnlyErrors)} // Toggle between showing errors or all rows
-                className="flex items-center gap-2 px-4 py-2 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 rounded-lg hover:bg-red-200 dark:hover:bg-red-900/50 transition-colors"
-              >
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-                Show Errors ({errors.length})
-              </button>
-            )}
-
-            {/* Valid Badge */}
-            {errors.length === 0 && data.length > 0 && (
-              <span className="flex items-center gap-2 px-4 py-2 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 rounded-lg">
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                </svg>
-                All Rows Valid
-              </span>
-            )}
-          </div>
-
-          <EditablePreviewTable data={filteredData} errors={errors} onCellChange={handleCellChange} />
-        </div>
-      )}
-
-      {/* Error Modal */}
-      {showErrorModal && errors.length > 0 && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white dark:bg-slate-800 rounded-xl shadow-2xl max-w-2xl w-full max-h-[80vh] flex flex-col">
-            {/* Modal Header */}
-            <div className="flex items-center justify-between p-4 border-b border-slate-200 dark:border-slate-700">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-full bg-red-100 dark:bg-red-900/30 flex items-center justify-center">
-                  <svg className="w-6 h-6 text-red-600 dark:text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            {/* Error Actions */}
+            <div className="flex items-center gap-3">
+              {errors.length > 0 && (
+                <button
+                  onClick={handleViewErrors}
+                  className="flex items-center gap-2 px-4 py-2 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 rounded-lg hover:bg-red-200 dark:hover:bg-red-900/50 transition-colors font-medium"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                   </svg>
-                </div>
-                <div>
-                  <h3 className="text-lg font-semibold">Validation Errors</h3>
-                  <p className="text-sm text-text-muted">{errors.length} row(s) need attention</p>
-                </div>
-              </div>
-              <button
-                onClick={() => setShowErrorModal(false)}
-                className="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition-colors"
-              >
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
+                  View All {errors.length} Errors in Separate Page
+                </button>
+              )}
 
-            {/* Modal Body */}
-            <div className="flex-1 overflow-auto p-4">
-              <ErrorSummaryPanel errors={errors} />
-            </div>
-
-            {/* Modal Footer */}
-            <div className="p-4 border-t border-slate-200 dark:border-slate-700 flex justify-end gap-3">
-              <AnimatedButton variant="secondary" onClick={() => setShowErrorModal(false)}>
-                Close
-              </AnimatedButton>
-              <AnimatedButton variant="primary" onClick={() => { setShowErrorModal(false); }}>
-                Fix Errors in Table
-              </AnimatedButton>
+              {/* Valid Badge */}
+              {errors.length === 0 && (
+                <span className="flex items-center gap-2 px-4 py-2 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 rounded-lg">
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                  </svg>
+                  All Rows Valid
+                </span>
+              )}
             </div>
           </div>
+
+          <EditablePreviewTable data={data} errors={errors} onCellChange={handleCellChange} onDeleteRows={handleDeleteRows} />
         </div>
       )}
 
@@ -446,21 +412,6 @@ export default function MeterUploadPage() {
             <p>Updated: {success.modifiedCount ?? 0}</p>
             <p>Upserted: {success.upsertedCount ?? 0}</p>
           </div>
-        </div>
-      )}
-
-      {/* Auto-Calculated Fields Info */}
-      {data.length > 0 && isValid && (
-        <div className="surface p-6 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800">
-          <h4 className="text-blue-800 dark:text-blue-300 font-medium mb-2">Auto-Calculated Fields Added:</h4>
-          <ul className="text-sm text-blue-700 dark:text-blue-400 space-y-1 list-disc list-inside">
-            <li><strong>Plant Start Time:</strong> First time when POA ≥ 10 W/m²</li>
-            <li><strong>Plant Stop Time:</strong> Last time when POA {'>'} 0 and {'<'} 50 W/m²</li>
-            <li><strong>Total:</strong> Stop Time - Start Time (HH:MM)</li>
-            <li><strong>Export/Import Totals:</strong> Final Reading - Initial Reading</li>
-            <li><strong>GSS Export/Import Total:</strong> Sum of GSS meter totals</li>
-            <li><strong>Net Export @GSS:</strong> GSS Export - GSS Import</li>
-          </ul>
         </div>
       )}
     </div>
