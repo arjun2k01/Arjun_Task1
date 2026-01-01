@@ -1,6 +1,10 @@
-import { IsNotEmpty, IsNumber, IsOptional, Min, Max } from 'class-validator';
+import { IsNotEmpty, IsNumber, IsOptional, IsString, Min, Max } from 'class-validator';
 
 export class CreateWeatherDto {
+  @IsOptional()
+  @IsString()
+  siteName?: string;
+
   @IsNotEmpty()
   date: string;
 

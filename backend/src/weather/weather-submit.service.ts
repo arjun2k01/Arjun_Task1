@@ -36,7 +36,7 @@ export class WeatherSubmitService {
       }
 
       // Map row to schema fields
-      const doc = {
+      const doc: Record<string, any> = {
         date,
         time,
         poa: this.toNumber(row['POA']),
@@ -48,7 +48,15 @@ export class WeatherSubmitService {
         windSpeed: this.toNumber(row['WindSpeed']),
         rainfall: this.toNumber(row['Rainfall']),
         humidity: this.toNumber(row['Humidity']),
+        status: row['status'] ?? row['Status'] ?? 'draft',
       };
+
+      const siteName = this.toText(
+        row['Site Name'] ?? row['SiteName'] ?? row['siteName'] ?? row['Site'] ?? row['site'],
+      );
+      if (siteName) {
+        doc.siteName = siteName;
+      }
 
       // Use upsert to handle duplicates automatically
       ops.push({
@@ -91,5 +99,11 @@ export class WeatherSubmitService {
     }
     const num = Number(value);
     return isNaN(num) ? 0 : num;
+  }
+
+  private toText(value: any): string | null {
+    if (value === null || value === undefined) return null;
+    const text = String(value).trim();
+    return text ? text : null;
   }
 }

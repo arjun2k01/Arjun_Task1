@@ -10,6 +10,7 @@ import { WeatherUploadController } from './weather-upload.controller';  // Impor
 import { WeatherValidateController } from './weather-validate.controller';
 import { WeatherSubmitController } from './weather-submit.controller';
 import { WeatherTemplateController } from './weather-template.controller';
+import { WeatherAdminController } from './weather-admin.controller';
 
 import { WeatherValidateService } from './weather-validate.service';
 import { WeatherSubmitService } from './weather-submit.service';
@@ -25,6 +26,7 @@ import { WeatherExcelService } from './weather-excel.service'; // ✅ add
     WeatherValidateController,
     WeatherSubmitController,
     WeatherTemplateController,
+    WeatherAdminController,
   ],
   providers: [
     WeatherService,

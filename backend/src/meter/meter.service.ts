@@ -73,15 +73,26 @@ export class MeterService {
   }
 
   // READ ALL with filters - includes correlated weather data
-  async findAll(options: FindAllOptions = {}): Promise<{ data: MeterWithWeather[]; total: number }> {
-    const { startDate, endDate, limit = 100, skip = 0 } = options;
+  async findAll(options: FindAllOptions | Record<string, any> = {}): Promise<any> {
+    // Support both FindAllOptions and direct query object
+    let filter: Record<string, any> = {};
+    let limit = 100;
+    let skip = 0;
 
-    const filter: Record<string, any> = {};
+    if ('startDate' in options || 'endDate' in options || 'limit' in options || 'skip' in options) {
+      // Using FindAllOptions format
+      const { startDate, endDate, limit: optLimit = 100, skip: optSkip = 0 } = options as FindAllOptions;
+      limit = optLimit;
+      skip = optSkip;
 
-    if (startDate || endDate) {
-      filter.date = {};
-      if (startDate) filter.date.$gte = startDate;
-      if (endDate) filter.date.$lte = endDate;
+      if (startDate || endDate) {
+        filter.date = {};
+        if (startDate) filter.date.$gte = startDate;
+        if (endDate) filter.date.$lte = endDate;
+      }
+    } else {
+      // Using direct query object (for sync service)
+      filter = options;
     }
 
     const [meterData, total] = await Promise.all([
@@ -278,6 +289,11 @@ export class MeterService {
   async removeMany(ids: string[]): Promise<{ deletedCount: number }> {
     const result = await this.meterModel.deleteMany({ _id: { $in: ids } }).exec();
     return { deletedCount: result.deletedCount ?? 0 };
+  }
+
+  // COUNT documents with filter
+  async count(filter: Record<string, any> = {}): Promise<number> {
+    return this.meterModel.countDocuments(filter).exec();
   }
 
   private toNumber(value: any): number | null {

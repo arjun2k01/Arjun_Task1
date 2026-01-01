@@ -11,6 +11,7 @@ export class WeatherTemplateController {
     const headers = [
       'Date',
       'Time',
+      'Site Name',
       'POA',
       'GHI',
       'AlbedoUp',
@@ -25,6 +26,7 @@ export class WeatherTemplateController {
     const sampleRow = {
       Date: '01-01-2025',
       Time: '10:00',
+      'Site Name': 'Site A',
       POA: 500,
       GHI: 600,
       AlbedoUp: 50,

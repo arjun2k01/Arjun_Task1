@@ -1,11 +1,12 @@
-import { useState, useEffect } from 'react'; // Added useEffect
-import { useNavigate, useLocation } from 'react-router-dom'; // Added hooks
+import { useState, useEffect } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
 import Topbar from '../../components/layout/Topbar';
 import AnimatedButton from '../../components/common/AnimatedButton';
 import EditablePreviewTable from '../../components/tables/EditablePreviewTable';
 import { useToast } from '../../components/common/ToastProvider';
 import LoadingOverlay from '../../components/common/LoadingOverlay';
 import FileDropzone from '../../components/common/FileDropzone';
+import SiteNameModal from '../../components/modals/SiteNameModal';
 import { apiUrl } from '../../config/api';
 
 interface RowError {
@@ -49,17 +50,56 @@ function normalizeData(input: any): Record<string, any>[] {
   return [];
 }
 
+function normalizeSiteName(value: any): string {
+  if (value === null || value === undefined) return '';
+  const text = String(value).trim();
+  return text ? text : '';
+}
+
+function getRowSiteName(row: Record<string, any>): string {
+  const candidates = [
+    row['Site Name'],
+    row['SiteName'],
+    row['siteName'],
+    row['Site'],
+    row['site'],
+  ];
+
+  for (const candidate of candidates) {
+    const text = normalizeSiteName(candidate);
+    if (text) return text;
+  }
+
+  return '';
+}
+
+function applySiteNameToRows(rows: Record<string, any>[], siteName: string): Record<string, any>[] {
+  const normalizedSite = normalizeSiteName(siteName);
+  if (!normalizedSite) return rows;
+
+  return rows.map((row) => {
+    const existing = getRowSiteName(row);
+    if (existing) {
+      return { ...row, siteName: existing };
+    }
+    return { ...row, siteName: normalizedSite };
+  });
+}
+
 type LoadingPhase = 'idle' | 'upload' | 'validate' | 'submit';
 
 export default function MeterUploadPage() {
   const { pushToast } = useToast();
   const navigate = useNavigate();
-  const location = useLocation(); // Hook for checking history state
+  const location = useLocation();
 
   // Initialize state from location.state if available (preserves data when returning from Error Page)
   const [data, setData] = useState<Record<string, any>[]>(location.state?.data || []);
   const [errors, setErrors] = useState<RowError[]>(location.state?.errors || []);
   const [isValid, setIsValid] = useState(false);
+  const [siteName, setSiteName] = useState('');
+  const [showSiteNameModal, setShowSiteNameModal] = useState(false);
+  const [pendingFile, setPendingFile] = useState<File | null>(null);
 
   const [file, setFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
@@ -100,12 +140,49 @@ export default function MeterUploadPage() {
           ? 'Saving valid rows and skipping duplicates.'
           : 'Please wait.';
 
+  // Handle file selection - show site name modal first
+  const handleFileChange = (selectedFile: File | null) => {
+    if (!selectedFile) {
+      setFile(null);
+      setPendingFile(null);
+      return;
+    }
+
+    // If site name is already set, use it directly
+    if (siteName && siteName.trim()) {
+      setFile(selectedFile);
+      return;
+    }
+
+    // Otherwise, show modal to get site name
+    setPendingFile(selectedFile);
+    setShowSiteNameModal(true);
+  };
+
+  // Confirm site name from modal
+  const handleSiteNameConfirm = (name: string) => {
+    setSiteName(name);
+    if (pendingFile) {
+      setFile(pendingFile);
+      setPendingFile(null);
+    }
+  };
+
   const handleUpload = async () => {
     if (!file) {
       pushToast({
         type: 'error',
         title: 'No file selected',
         message: 'Please choose an Excel file (.xlsx/.xls) and try again.',
+      });
+      return;
+    }
+
+    if (!siteName || !siteName.trim()) {
+      pushToast({
+        type: 'error',
+        title: 'Site name required',
+        message: 'Please enter a site name before uploading.',
       });
       return;
     }
@@ -131,9 +208,10 @@ export default function MeterUploadPage() {
       const result: any = await res.json();
 
       const normalizedData = normalizeData(result?.rows ?? result?.meterData ?? result?.data);
+      const enrichedData = applySiteNameToRows(normalizedData, siteName);
       const normalizedErrors = normalizeErrors(result?.errors);
 
-      setData(normalizedData);
+      setData(enrichedData);
       setErrors(normalizedErrors);
 
       const valid = typeof result?.isValid === 'boolean' ? result.isValid : normalizedErrors.length === 0;
@@ -143,7 +221,7 @@ export default function MeterUploadPage() {
         type: valid ? 'success' : 'info',
         title: valid ? 'Upload validated' : 'Upload needs fixes',
         message: valid
-          ? `${normalizedData.length} rows are valid. You can submit to the database.`
+          ? `${enrichedData.length} rows are valid. You can submit to the database.`
           : `${normalizedErrors.length} row(s) have validation issues.`,
       });
 
@@ -231,7 +309,7 @@ export default function MeterUploadPage() {
       const normalizedErrors = normalizeErrors(result?.errors);
 
       if (enrichedRows.length > 0) {
-        setData(enrichedRows);
+        setData(applySiteNameToRows(enrichedRows, siteName));
       }
 
       setErrors(normalizedErrors);
@@ -266,10 +344,11 @@ export default function MeterUploadPage() {
     setPhase('submit');
 
     try {
+      const rowsToSubmit = applySiteNameToRows(data, siteName);
       const res = await fetch(apiUrl('/meter/submit'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ rows: data }),
+        body: JSON.stringify({ rows: rowsToSubmit }),
       });
 
       if (!res.ok) {
@@ -308,16 +387,48 @@ export default function MeterUploadPage() {
     <div className="flex flex-col gap-6">
       <LoadingOverlay show={loading} title={overlayTitle} subtitle={overlaySubtitle} />
 
+      {/* Site Name Modal */}
+      <SiteNameModal
+        isOpen={showSiteNameModal}
+        onClose={() => {
+          setShowSiteNameModal(false);
+          setPendingFile(null);
+        }}
+        onConfirm={handleSiteNameConfirm}
+        title="Enter Site Name"
+        defaultValue={siteName}
+      />
+
       <Topbar title="Meter Excel Upload" subtitle="Upload, edit, validate, and submit meter data" />
 
       {/* Upload Section */}
       <div className="surface p-6">
         <div className="flex items-start justify-between gap-4">
-          <div>
+          <div className="flex-1">
             <h3 className="mb-2">Upload Excel File</h3>
             <p className="mb-4">
-              Upload a meter Excel file. Fix validation errors directly in the table before submitting.
+              Upload a meter Excel file. You'll be asked for the site name before upload.
             </p>
+
+            {/* Display current site name if set */}
+            {siteName && (
+              <div className="mb-4 p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
+                <div className="flex items-center gap-2">
+                  <svg className="w-5 h-5 text-blue-600 dark:text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+                  </svg>
+                  <span className="text-sm font-medium text-blue-900 dark:text-blue-100">
+                    Site Name: <span className="font-bold">{siteName}</span>
+                  </span>
+                  <button
+                    onClick={() => setShowSiteNameModal(true)}
+                    className="ml-auto text-xs text-blue-600 dark:text-blue-400 hover:underline"
+                  >
+                    Change
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
 
           <AnimatedButton variant="secondary" onClick={downloadTemplate}>
@@ -328,7 +439,7 @@ export default function MeterUploadPage() {
         <div className="mt-4">
           <FileDropzone
             value={file}
-            onChange={setFile}
+            onChange={handleFileChange}
             accept=".xlsx,.xls"
             disabled={loading}
             title="Drop your Meter Excel file here"

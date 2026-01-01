@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import Topbar from '../../components/layout/Topbar';
 import AnimatedButton from '../../components/common/AnimatedButton';
 import LoadingOverlay from '../../components/common/LoadingOverlay';
@@ -20,6 +20,7 @@ interface WeatherData {
 
 interface MeterRecord {
   _id: string;
+  siteName?: string;
   date: string;
   time: string;
   startTime: string;
@@ -33,12 +34,14 @@ interface MeterRecord {
   frequency: number;
   powerFactor: number;
   weatherData: WeatherData | null;
+  status?: string;
   createdAt?: string;
   updatedAt?: string;
 }
 
 const METER_COLUMNS = [
   { key: 'date', label: 'Date', width: 100 },
+  { key: 'siteName', label: 'Site Name', width: 120 },
   { key: 'startTime', label: 'Start Time', width: 90 },
   { key: 'endTime', label: 'End Time', width: 90 },
   { key: 'activeEnergyImport', label: 'Active Import', width: 100 },
@@ -53,9 +56,11 @@ const METER_COLUMNS = [
   { key: 'weatherData.ghi', label: 'GHI (W/m²)', width: 100 },
   { key: 'weatherData.moduleTemp', label: 'Mod Temp (°C)', width: 110 },
   { key: 'weatherData.ambientTemp', label: 'Amb Temp (°C)', width: 110 },
+  { key: 'status', label: 'Status', width: 80 },
 ];
 
 const METER_FIELDS = [
+  { key: 'siteName', label: 'Site Name', type: 'text' as const, required: false, placeholder: 'Site A' },
   { key: 'date', label: 'Date', type: 'text' as const, required: true, placeholder: 'DD-MM-YYYY (e.g., 01-12-2024)' },
   { key: 'time', label: 'Time', type: 'text' as const, required: false, placeholder: 'HH:MM (e.g., 10:00)' },
   { key: 'activeEnergyImport', label: 'Active Energy Import', type: 'number' as const, required: false, min: 0 },
@@ -66,7 +71,13 @@ const METER_FIELDS = [
   { key: 'current', label: 'Current (A)', type: 'number' as const, required: false, min: 0 },
   { key: 'frequency', label: 'Frequency (Hz)', type: 'number' as const, required: false, min: 0 },
   { key: 'powerFactor', label: 'Power Factor', type: 'number' as const, required: false, min: 0, max: 1, step: 0.01 },
+  { key: 'status', label: 'Status', type: 'text' as const, required: false, placeholder: 'draft' },
 ];
+
+const DEFAULT_PAGE_SIZE = 20;
+const FETCH_BATCH_SIZE = 200;
+const SITE_ALL = 'all';
+const SITE_UNASSIGNED = '__unassigned';
 
 export default function MeterListPage() {
   const { pushToast } = useToast();
@@ -75,7 +86,8 @@ export default function MeterListPage() {
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
   const [page, setPage] = useState(1);
-  const [pageSize] = useState(20);
+  const [pageSize] = useState(DEFAULT_PAGE_SIZE);
+  const [siteFilter, setSiteFilter] = useState(SITE_ALL);
 
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
@@ -86,22 +98,112 @@ export default function MeterListPage() {
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const skip = (page - 1) * pageSize;
-      const res = await fetch(apiUrl(`/meter?limit=${pageSize}&skip=${skip}`));
-      if (!res.ok) throw new Error('Failed to fetch');
-      const result = await res.json();
-      setData(result.data || []);
-      setTotal(result.total || 0);
+      let skip = 0;
+      let totalCount = 0;
+      const rows: MeterRecord[] = [];
+
+      while (true) {
+        const res = await fetch(apiUrl(`/meter?limit=${FETCH_BATCH_SIZE}&skip=${skip}`));
+        if (!res.ok) throw new Error('Failed to fetch');
+        const result = await res.json();
+
+        const batch = Array.isArray(result.data) ? result.data : [];
+        const totalValue = Number(result.total);
+        if (Number.isFinite(totalValue)) {
+          totalCount = totalValue;
+        }
+
+        rows.push(...batch);
+
+        if (batch.length === 0 || batch.length < FETCH_BATCH_SIZE) {
+          break;
+        }
+
+        if (totalCount > 0 && rows.length >= totalCount) {
+          break;
+        }
+
+        skip += batch.length;
+      }
+
+      setData(rows);
+      setTotal(totalCount > 0 ? totalCount : rows.length);
     } catch (err: any) {
       pushToast({ type: 'error', title: 'Failed to load data', message: err.message });
     } finally {
       setLoading(false);
     }
-  }, [page, pageSize, pushToast]);
+  }, [pushToast]);
 
   useEffect(() => {
     fetchData();
   }, [fetchData]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [siteFilter]);
+
+  // Extract unique site names for dropdown
+  const siteOptions = useMemo(() => {
+    const names = new Set<string>();
+    data.forEach((row) => {
+      const name = row.siteName ? row.siteName.trim() : '';
+      if (name) {
+        names.add(name);
+      }
+    });
+    return Array.from(names).sort((a, b) => a.localeCompare(b));
+  }, [data]);
+
+  const hasUnassigned = useMemo(
+    () => data.some((row) => !row.siteName || row.siteName.trim() === ''),
+    [data],
+  );
+
+  useEffect(() => {
+    if (siteFilter === SITE_ALL) return;
+    if (siteFilter === SITE_UNASSIGNED) {
+      if (!hasUnassigned) setSiteFilter(SITE_ALL);
+      return;
+    }
+    if (!siteOptions.includes(siteFilter)) {
+      setSiteFilter(SITE_ALL);
+    }
+  }, [hasUnassigned, siteFilter, siteOptions]);
+
+  // Filter data by site
+  const filteredData = useMemo(() => {
+    if (siteFilter === SITE_ALL) return data;
+    if (siteFilter === SITE_UNASSIGNED) {
+      return data.filter((row) => !row.siteName || row.siteName.trim() === '');
+    }
+    return data.filter((row) => row.siteName && row.siteName.trim() === siteFilter);
+  }, [data, siteFilter]);
+
+  useEffect(() => {
+    const totalPages = Math.max(1, Math.ceil(filteredData.length / pageSize));
+    if (page > totalPages) {
+      setPage(1);
+    }
+  }, [filteredData.length, page, pageSize]);
+
+  // **Sort Data** to show records with errors first
+  const sortedData = useMemo(() => {
+    return [...filteredData].sort((a, b) => {
+      // Check if record a has errors and b does not (error rows should come first)
+      const aHasError = a?.activeEnergyImport < 0; // You can modify this to check specific error fields
+      const bHasError = b?.activeEnergyImport < 0;
+
+      if (aHasError && !bHasError) return -1;
+      if (!aHasError && bHasError) return 1;
+      return 0;
+    });
+  }, [filteredData]);
+
+  const pagedData = useMemo(() => {
+    const start = (page - 1) * pageSize;
+    return sortedData.slice(start, start + pageSize);
+  }, [page, pageSize, sortedData]);
 
   const handleCreate = async (formData: Record<string, any>) => {
     try {
@@ -180,17 +282,6 @@ export default function MeterListPage() {
     setShowDeleteModal(true);
   };
 
-  // **Sort Data** to show records with errors first
-  const sortedData = data.sort((a, b) => {
-    // Check if record a has errors and b does not (error rows should come first)
-    const aHasError = a?.activeEnergyImport < 0; // You can modify this to check specific error fields
-    const bHasError = b?.activeEnergyImport < 0;
-
-    if (aHasError && !bHasError) return -1;
-    if (!aHasError && bHasError) return 1;
-    return 0;
-  });
-
   return (
     <div className="flex flex-col gap-6">
       <LoadingOverlay show={loading} title="Loading data..." />
@@ -199,8 +290,25 @@ export default function MeterListPage() {
 
       <div className="surface p-6">
         <div className="flex items-center justify-between mb-4">
-          <h3>Meter Records ({total} total)</h3>
-          <div className="flex gap-2">
+          <h3>Meter Records ({siteFilter === SITE_ALL ? total : filteredData.length} total)</h3>
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-text-muted">Site</span>
+              <select
+                value={siteFilter}
+                onChange={(e) => setSiteFilter(e.target.value)}
+                className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
+                aria-label="Filter by site"
+              >
+                <option value={SITE_ALL}>All Sites</option>
+                {hasUnassigned && <option value={SITE_UNASSIGNED}>Unassigned</option>}
+                {siteOptions.map((site) => (
+                  <option key={site} value={site}>
+                    {site}
+                  </option>
+                ))}
+              </select>
+            </div>
             {selectedIds.length > 0 && (
               <AnimatedButton variant="danger" onClick={() => openDeleteModal()}>
                 Delete Selected ({selectedIds.length})
@@ -213,7 +321,7 @@ export default function MeterListPage() {
         </div>
 
         <DataTable
-          data={sortedData} // Use the sorted data
+          data={pagedData}
           columns={METER_COLUMNS}
           selectedIds={selectedIds}
           onSelectionChange={setSelectedIds}
@@ -222,10 +330,10 @@ export default function MeterListPage() {
           idKey="_id"
         />
 
-        {total > pageSize && (
+        {filteredData.length > pageSize && (
           <div className="flex items-center justify-between mt-4 pt-4 border-t border-border-light dark:border-border-dark">
             <span className="text-sm text-text-muted">
-              Page {page} of {Math.ceil(total / pageSize)}
+              Page {page} of {Math.ceil(filteredData.length / pageSize)}
             </span>
             <div className="flex gap-2">
               <AnimatedButton
@@ -237,7 +345,7 @@ export default function MeterListPage() {
               </AnimatedButton>
               <AnimatedButton
                 variant="secondary"
-                disabled={page >= Math.ceil(total / pageSize)}
+                disabled={page >= Math.ceil(filteredData.length / pageSize)}
                 onClick={() => setPage((p) => p + 1)}
               >
                 Next

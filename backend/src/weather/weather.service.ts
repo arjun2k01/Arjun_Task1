@@ -13,7 +13,22 @@ export class WeatherService {
   }
 
   async findAllWithFilters(filters: any) {
-    return this.weatherModel.find(filters).exec();
+    const { limit, skip, ...queryFilters } = filters;
+
+    const query = this.weatherModel.find(queryFilters);
+
+    if (skip) {
+      query.skip(skip);
+    }
+
+    if (limit) {
+      query.limit(limit);
+    }
+
+    const data = await query.exec();
+    const total = await this.weatherModel.countDocuments(queryFilters).exec();
+
+    return { data, total };
   }
 
   async findOne(id: string) {

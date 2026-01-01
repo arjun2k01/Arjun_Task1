@@ -5,6 +5,9 @@ export type WeatherDocument = Weather & Document;
 
 @Schema({ timestamps: true })
 export class Weather {
+  @Prop()
+  siteName?: string;
+
   @Prop({ required: true })
   date: string; // DD-MMM-YY
 
@@ -37,6 +40,9 @@ export class Weather {
 
   @Prop({ min: 0 })
   humidity?: number;
+
+  @Prop({ default: 'draft' })
+  status: string;
 }
 
 export const WeatherSchema = SchemaFactory.createForClass(Weather);

@@ -8,7 +8,7 @@ import { HealthModule } from './health/health.module';
 @Module({
   imports: [
     MongooseModule.forRoot(
-      'mongodb+srv://weatherMeter:WeatherOP@cluster0.f6x7db8.mongodb.net/?appName=Cluster0',
+      'mongodb+srv://inverterOP:inverterOP@cluster0.pnxrna2.mongodb.net/unified_energy_management?retryWrites=true&w=majority&appName=Cluster0',
     ),
     HealthModule,
     WeatherModule,

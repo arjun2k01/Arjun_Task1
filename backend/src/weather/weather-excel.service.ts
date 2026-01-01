@@ -89,6 +89,7 @@ export class WeatherExcelService {
         return {
           Date: this.normalizeDate(row['Date'] ?? row['date'] ?? row['DATE'] ?? ''),
           Time: this.normalizeTime(row['Time'] ?? row['time'] ?? row['TIME'] ?? ''),
+          'Site Name': row['Site Name'] ?? row['SiteName'] ?? row['siteName'] ?? row['Site'] ?? row['site'] ?? '',
           POA: row['POA'] ?? row['POA Pyranometer'] ?? row['poa'] ?? '',
           GHI: row['GHI'] ?? row['GHI Pyranometer'] ?? row['ghi'] ?? '',
           AlbedoUp: row['AlbedoUp'] ?? row['Albedo Up'] ?? row['Albedo (Up)'] ?? '',

@@ -14,6 +14,12 @@ export class Meter {
   @Prop({ required: true })
   plantStartTime: string;  // Plant Start Time, will be calculated
 
+  @Prop({ default: '00:00' })
+  plantStopTime: string;  // Plant Stop Time, will be calculated
+
+  @Prop({ default: '00:00' })
+  total: string;  // Total operation time (Stop - Start)
+
   @Prop({ default: 0 })
   activeEnergyImport: number;
 
@@ -37,6 +43,9 @@ export class Meter {
 
   @Prop({ default: 0 })
   powerFactor: number;
+
+  @Prop({ default: 'draft' })
+  status: string;
 }
 
 export const MeterSchema = SchemaFactory.createForClass(Meter);
